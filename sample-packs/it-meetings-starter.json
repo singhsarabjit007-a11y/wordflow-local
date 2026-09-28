@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "pack": {
+    "name": "IT Meetings — Starter Pack",
+    "description": "Useful words and phrases for status calls, project discussions and technical meetings.",
+    "topic": "IT Meetings",
+    "difficulty": "Intermediate"
+  },
+  "items": [
+    {
+      "term": "align on",
+      "type": "phrase",
+      "meaning": "To reach a shared understanding or agreement about something.",
+      "explanation": "Common in meetings when people need to agree on priorities, expectations, scope or next steps before work continues.",
+      "category": "IT Meetings",
+      "difficulty": "Intermediate",
+      "examples": [
+        "Let's align on the priorities before we start implementation.",
+        "We need to align on the timeline with the infrastructure team.",
+        "Can we align on the expected outcome before tomorrow's meeting?",
+        "Engineering and operations should align on the deployment strategy.",
+        "Once we've aligned on the requirements, we can move forward."
+      ]
+    },
+    {
+      "term": "flag something",
+      "type": "phrase",
+      "meaning": "To deliberately draw attention to an issue, risk or important detail.",
+      "explanation": "A concise professional way to raise something that others should notice or consider without making it sound unnecessarily dramatic.",
+      "category": "IT Meetings",
+      "difficulty": "Intermediate",
+      "examples": [
+        "I'd like to flag one dependency that could affect the release date.",
+        "Before we close, I want to flag a potential access-control issue.",
+        "The analyst flagged the unusual traffic pattern during the review.",
+        "Please flag any blockers as soon as they appear.",
+        "I just want to flag that the estimate assumes the API remains unchanged."
+      ]
+    },
+    {
+      "term": "contingency",
+      "type": "noun",
+      "meaning": "A plan or provision for dealing with a possible future problem or unexpected event.",
+      "explanation": "Often used in project, security and operational planning when discussing fallback options if the preferred plan does not work.",
+      "category": "Planning",
+      "difficulty": "Intermediate",
+      "examples": [
+        "We should have a contingency in place in case the deployment fails.",
+        "The rollback procedure is our main contingency for this release.",
+        "Do we have a contingency if the vendor misses the delivery date?",
+        "The team allocated additional capacity as a contingency for peak traffic.",
+        "Before approval, management asked us to document the contingency plan."
+      ]
+    },
+    {
+      "term": "actionable",
+      "type": "adjective",
+      "meaning": "Clear and practical enough to be acted upon.",
+      "explanation": "Useful when distinguishing information that leads to a concrete next step from information that is merely interesting or descriptive.",
+      "category": "Decision Making",
+      "difficulty": "Intermediate",
+      "examples": [
+        "The report needs to end with actionable recommendations.",
+        "Can we turn these findings into something actionable for the engineering team?",
+        "The alert contains useful data, but it is not yet actionable.",
+        "Management asked for a short list of actionable next steps.",
+        "We need actionable evidence before escalating the incident."
+      ]
+    },
+    {
+      "term": "trade-off",
+      "type": "noun",
+      "meaning": "A compromise in which gaining one benefit requires accepting a disadvantage elsewhere.",
+      "explanation": "Common when comparing technical designs, project constraints, performance, cost, security or delivery speed.",
+      "category": "Decision Making",
+      "difficulty": "Intermediate",
+      "examples": [
+        "There is a trade-off between deployment speed and the amount of validation we can perform.",
+        "We should make the performance trade-off explicit before choosing the architecture.",
+        "The lower-cost option comes with a trade-off in support coverage.",
+        "Security and usability often involve practical trade-offs.",
+        "Let's document the trade-offs so management can make an informed decision."
+      ]
+    }
+  ]
+}

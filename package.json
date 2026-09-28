@@ -1,0 +1,19 @@
+{
+  "name": "wordflow-v1",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Personal AI-assisted vocabulary learning PWA backed by Supabase and Netlify.",
+  "scripts": {
+    "dev": "npx netlify-cli@27.10.0 dev",
+    "check": "node --check public/js/app.js && node --check public/sw.js && node --check netlify/functions/config.mjs && node --check netlify/functions/_shared/notifications.mjs && node tests/validate-sample.mjs"
+  },
+  "dependencies": {
+    "@netlify/functions": "6.0.0",
+    "@supabase/supabase-js": "2.117.1",
+    "web-push": "3.6.7"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
