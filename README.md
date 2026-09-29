@@ -16,6 +16,10 @@ new device.
 - One daily word or phrase with type, meaning, explanation and five examples
 - Add a word manually or import a JSON vocabulary pack
 - Queue, searchable library and status filters
+- Search words by term, meaning, explanation, category, type or difficulty
+- Save favourite words for quick filtering
+- Browser pronunciation using the device's built-in text-to-speech voice
+- Spaced repetition reviews at 1, 3, 7, 21 and 60 days
 - Mark words learned or put them in review
 - Five configurable local reminder times
 - Browser notification permission (reminders fire while WordFlow is open)
@@ -73,7 +77,5 @@ This validates the PWA JavaScript syntax and the included sample pack.
 
 - Reliable closed-app push notifications
 - Cloud backup and multi-device sync
-- Pronunciation audio
-- Spaced repetition
 - AI-created packs and sentence feedback
 - Categories, favourites and learning statistics

@@ -9,6 +9,8 @@ const DB_VERSION = 1;
 const ITEM_STORE = 'items';
 const SETTINGS_STORE = 'settings';
 const DEFAULT_REMINDER_TIMES = ['09:00', '12:00', '15:00', '18:00', '21:00'];
+// Each successful review moves the word to the next gap in this sequence.
+const REVIEW_INTERVALS_DAYS = [1, 3, 7, 21, 60];
 const VALID_STATUSES = new Set(['queued', 'active', 'review', 'learned']);
 
 const MASTER_PROMPT = `Create a WordFlow vocabulary learning pack as valid JSON.
@@ -43,6 +45,7 @@ const show = (element) => element?.classList.remove('hidden');
 const hide = (element) => element?.classList.add('hidden');
 const normalizeTerm = (value) => value.trim().toLocaleLowerCase().replace(/\s+/g, ' ');
 const todayKey = () => new Date().toLocaleDateString('en-CA');
+const addDaysKey = (days) => { const date = new Date(); date.setDate(date.getDate() + days); return date.toLocaleDateString('en-CA'); };
 const uid = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 /* IndexedDB's low-level API is wrapped once so feature code remains readable. */
@@ -77,6 +80,15 @@ function defaultSettings() { return { reminderTimes: DEFAULT_REMINDER_TIMES, tod
 async function loadSettings() { settings = { ...defaultSettings(), ...(await getSetting('app')) }; await persistSettings(); }
 async function persistSettings() { await saveSetting('app', settings); }
 
+async function upgradeStoredItems() {
+  // Existing V1 users keep their data when new optional fields are introduced.
+  for (const item of await getAllItems()) {
+    if (item.isFavorite === undefined || item.reviewStage === undefined || item.reviewDueDate === undefined) {
+      await saveItem({ isFavorite: false, reviewStage: null, reviewDueDate: null, ...item });
+    }
+  }
+}
+
 function createManualExampleFields() {
   const container = $('manualExamples');
   container.replaceChildren();
@@ -108,6 +120,8 @@ function wireEvents() {
   $('refreshTodayBtn').addEventListener('click', () => loadToday());
   $('knowBtn').addEventListener('click', () => updateTodayStatus('learned'));
   $('reviewBtn').addEventListener('click', () => updateTodayStatus('review'));
+  $('speakBtn').addEventListener('click', pronounceTodayWord);
+  $('favoriteBtn').addEventListener('click', () => currentTodayItem && toggleFavorite(currentTodayItem));
   $('notificationBtn').addEventListener('click', enableNotifications);
   $('addWordForm').addEventListener('submit', addManualWord);
   $('jsonFileInput').addEventListener('change', readFileImport);
@@ -125,13 +139,14 @@ function wireEvents() {
 }
 
 function navigate(section) {
-  const allowed = ['today', 'queue', 'library', 'add', 'import', 'settings'];
+  const allowed = ['today', 'queue', 'review', 'library', 'add', 'import', 'settings'];
   const target = allowed.includes(section) ? section : 'today';
   document.querySelectorAll('[data-section]').forEach((element) => element.classList.toggle('hidden', element.dataset.section !== target));
   document.querySelectorAll('.nav-item').forEach((button) => button.classList.toggle('active', button.dataset.nav === target));
   history.replaceState(null, '', `#${target}`);
   if (target === 'today') loadToday();
   if (target === 'queue') renderQueue();
+  if (target === 'review') renderReviews();
   if (target === 'library') renderLibrary();
   if (target === 'settings') createReminderTimeFields();
 }
@@ -170,22 +185,30 @@ async function loadToday() {
   $('todayExplanation').textContent = currentTodayItem.explanation || '';
   $('todayCategory').textContent = currentTodayItem.category || '';
   $('todayExamples').replaceChildren(...currentTodayItem.examples.map((example) => { const item = document.createElement('li'); item.textContent = example; return item; }));
-  $('knowBtn').textContent = currentTodayItem.status === 'learned' ? '✓ Learned' : '✓ I know this';
+  $('knowBtn').textContent = currentTodayItem.reviewStage !== null ? '✓ Review plan set' : '✓ I know this';
   $('reviewBtn').textContent = currentTodayItem.status === 'review' ? 'In review' : 'Review later';
+  $('favoriteBtn').textContent = currentTodayItem.isFavorite ? '★ Saved' : '☆ Save';
   await updateNotificationStatus();
 }
 
 async function updateTodayStatus(status) {
   if (!currentTodayItem) return;
-  const updated = { ...currentTodayItem, status };
-  if (status === 'learned') updated.learnedAt = new Date().toISOString();
+  let updated = { ...currentTodayItem, status };
+  if (status === 'learned') updated = scheduleFirstReview(updated);
+  // "Review later" keeps an item visible in the review tab today without
+  // changing the spaced-repetition stage that it may receive later.
+  if (status === 'review') updated = { ...updated, reviewDueDate: todayKey(), reviewStage: null };
   await saveItem(updated); currentTodayItem = updated;
-  showToast(status === 'learned' ? 'Great work — this word is now learned.' : 'Added to your review list.');
-  await Promise.all([loadToday(), renderQueue(), renderLibrary()]);
+  showToast(status === 'learned' ? 'Added to your 1, 3, 7, 21, 60-day review plan.' : 'Added to your review list.');
+  await Promise.all([loadToday(), renderQueue(), renderReviews(), renderLibrary()]);
+}
+
+function scheduleFirstReview(item) {
+  return { ...item, status: 'review', learnedAt: new Date().toISOString(), reviewStage: 0, reviewDueDate: addDaysKey(REVIEW_INTERVALS_DAYS[0]) };
 }
 
 function buildItem(raw, queuePosition) {
-  return { id: uid(), term: raw.term.trim(), normalizedTerm: normalizeTerm(raw.term), type: raw.type.trim(), meaning: raw.meaning.trim(), explanation: (raw.explanation || '').trim(), category: (raw.category || '').trim(), difficulty: (raw.difficulty || '').trim(), examples: raw.examples.map((example) => example.trim()), status: 'queued', queuePosition, createdAt: new Date().toISOString(), startedOn: null, learnedAt: null };
+  return { id: uid(), term: raw.term.trim(), normalizedTerm: normalizeTerm(raw.term), type: raw.type.trim(), meaning: raw.meaning.trim(), explanation: (raw.explanation || '').trim(), category: (raw.category || '').trim(), difficulty: (raw.difficulty || '').trim(), examples: raw.examples.map((example) => example.trim()), status: 'queued', queuePosition, createdAt: new Date().toISOString(), startedOn: null, learnedAt: null, isFavorite: false, reviewStage: null, reviewDueDate: null };
 }
 
 async function addManualWord(event) {
@@ -233,29 +256,69 @@ async function importPack() {
   await Promise.all([loadToday(), renderQueue(), renderLibrary()]);
 }
 
-function makeListRow(item, actionLabel, action) {
+function makeListRow(item, actions = []) {
   const row = document.createElement('article'); row.className = 'list-item';
   const main = document.createElement('div'); main.className = 'list-main';
   const term = document.createElement('div'); term.className = 'list-term'; term.textContent = item.term;
   const meta = document.createElement('div'); meta.className = 'list-meta'; meta.textContent = `${item.type} · ${item.status}`;
   const meaning = document.createElement('div'); meaning.className = 'list-meaning'; meaning.textContent = item.meaning;
   main.append(term, meta, meaning); row.appendChild(main);
-  if (actionLabel) { const button = document.createElement('button'); button.className = 'mini-btn'; button.textContent = actionLabel; button.addEventListener('click', action); row.appendChild(button); }
+  if (actions.length) {
+    const actionGroup = document.createElement('div'); actionGroup.className = 'list-actions';
+    actions.forEach(({ label, action }) => { const button = document.createElement('button'); button.className = 'mini-btn'; button.textContent = label; button.addEventListener('click', action); actionGroup.appendChild(button); });
+    row.appendChild(actionGroup);
+  }
   return row;
 }
 
 async function renderQueue() {
   const items = (await getAllItems()).filter((item) => item.status === 'queued').sort((a, b) => a.queuePosition - b.queuePosition);
-  $('queueList').replaceChildren(...items.map((item) => makeListRow(item, 'Remove', async () => { await removeItem(item.id); showToast('Removed from the queue.'); renderQueue(); renderLibrary(); })));
+  $('queueList').replaceChildren(...items.map((item) => makeListRow(item, [{ label: 'Remove', action: async () => { await removeItem(item.id); showToast('Removed from the queue.'); renderQueue(); renderLibrary(); } }])));
   items.length ? hide($('queueEmpty')) : show($('queueEmpty'));
 }
 
 async function renderLibrary() {
   const query = $('librarySearch').value.trim().toLocaleLowerCase();
   const all = await getAllItems();
-  const visible = all.filter((item) => (libraryFilter === 'all' || item.status === libraryFilter) && `${item.term} ${item.meaning} ${item.category}`.toLocaleLowerCase().includes(query)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const visible = all.filter((item) => (libraryFilter === 'all' || (libraryFilter === 'favorite' ? item.isFavorite : item.status === libraryFilter)) && `${item.term} ${item.meaning} ${item.category} ${item.explanation} ${item.type} ${item.difficulty}`.toLocaleLowerCase().includes(query)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   $('libraryCount').textContent = `${all.length} word${all.length === 1 ? '' : 's'}`;
-  $('libraryList').replaceChildren(...visible.map((item) => makeListRow(item, item.status === 'learned' ? 'Learn again' : 'Mark learned', async () => { await saveItem({ ...item, status: item.status === 'learned' ? 'review' : 'learned', learnedAt: item.status === 'learned' ? null : new Date().toISOString() }); renderLibrary(); renderQueue(); loadToday(); })));
+  $('libraryList').replaceChildren(...visible.map((item) => makeListRow(item, [
+    { label: item.isFavorite ? '★' : '☆', action: () => toggleFavorite(item) },
+    { label: item.status === 'learned' ? 'Learn again' : 'Set review plan', action: async () => { await saveItem(item.status === 'learned' ? { ...item, status: 'review', reviewStage: null, reviewDueDate: todayKey() } : scheduleFirstReview(item)); renderLibrary(); renderReviews(); renderQueue(); loadToday(); } }
+  ])));
+}
+
+async function toggleFavorite(item) {
+  const updated = { ...item, isFavorite: !item.isFavorite };
+  await saveItem(updated);
+  if (currentTodayItem?.id === updated.id) currentTodayItem = updated;
+  showToast(updated.isFavorite ? 'Saved to favorites.' : 'Removed from favorites.');
+  await Promise.all([loadToday(), renderLibrary()]);
+}
+
+async function renderReviews() {
+  const due = (await getAllItems()).filter((item) => item.status === 'review' && item.reviewDueDate && item.reviewDueDate <= todayKey()).sort((a, b) => a.reviewDueDate.localeCompare(b.reviewDueDate));
+  $('reviewCount').textContent = `${due.length} due`;
+  $('reviewList').replaceChildren(...due.map((item) => makeListRow(item, [{ label: 'Reviewed', action: () => completeReview(item) }])));
+  due.length ? hide($('reviewEmpty')) : show($('reviewEmpty'));
+}
+
+async function completeReview(item) {
+  const nextStage = (item.reviewStage ?? -1) + 1;
+  const updated = nextStage >= REVIEW_INTERVALS_DAYS.length
+    ? { ...item, status: 'learned', reviewStage: nextStage, reviewDueDate: null, learnedAt: new Date().toISOString() }
+    : { ...item, status: 'review', reviewStage: nextStage, reviewDueDate: addDaysKey(REVIEW_INTERVALS_DAYS[nextStage]) };
+  await saveItem(updated);
+  showToast(updated.status === 'learned' ? 'Review plan complete — word learned.' : `Next review: ${updated.reviewDueDate}.`);
+  await Promise.all([renderReviews(), renderLibrary(), loadToday()]);
+}
+
+function pronounceTodayWord() {
+  if (!currentTodayItem || !('speechSynthesis' in window)) return showToast('Pronunciation is not supported in this browser.', true);
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(currentTodayItem.term);
+  utterance.lang = 'en-US'; utterance.rate = 0.82;
+  window.speechSynthesis.speak(utterance);
 }
 
 async function enableNotifications() {
@@ -329,7 +392,7 @@ async function boot() {
   try {
     db = await openDatabase();
     if ('serviceWorker' in navigator) await navigator.serviceWorker.register('/sw.js');
-    await loadSettings(); $('masterPrompt').textContent = MASTER_PROMPT;
+    await loadSettings(); await upgradeStoredItems(); $('masterPrompt').textContent = MASTER_PROMPT;
     createManualExampleFields(); createReminderTimeFields(); wireEvents(); scheduleReminders(); navigate(location.hash.slice(1) || 'today');
   } catch (error) { console.error(error); document.querySelector('.content').textContent = `WordFlow could not start: ${error.message}`; }
 }
