@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "pack": {
+    "name": "WordFlow feature test pack",
+    "description": "Five practical words for testing import, favorites, pronunciation, search, and spaced review.",
+    "topic": "Everyday professional English",
+    "difficulty": "Intermediate"
+  },
+  "items": [
+    {
+      "term": "resilient",
+      "type": "adjective",
+      "meaning": "Able to recover quickly from difficulty or change.",
+      "explanation": "Use it for people, teams, or systems that handle setbacks well.",
+      "category": "Work and growth",
+      "difficulty": "Intermediate",
+      "examples": [
+        "She remained resilient after the project was delayed.",
+        "A resilient system recovers after a service failure.",
+        "The team built a resilient process for handling incidents.",
+        "He showed resilient leadership during a difficult quarter.",
+        "Regular practice can make you more resilient."
+      ]
+    },
+    {
+      "term": "clarify",
+      "type": "verb",
+      "meaning": "To make something easier to understand.",
+      "explanation": "Use it when you want to remove confusion about an idea, request, or plan.",
+      "category": "Communication",
+      "difficulty": "Intermediate",
+      "examples": [
+        "Could you clarify what success looks like for this task?",
+        "The manager clarified the timeline during the meeting.",
+        "Please clarify which version of the document is final.",
+        "A diagram can clarify a complicated process.",
+        "She asked a question to clarify the customer’s concern."
+      ]
+    },
+    {
+      "term": "pragmatic",
+      "type": "adjective",
+      "meaning": "Focused on practical solutions rather than ideas alone.",
+      "explanation": "Use it to describe a realistic approach to a problem.",
+      "category": "Decision making",
+      "difficulty": "Intermediate",
+      "examples": [
+        "We need a pragmatic solution before the deadline.",
+        "Her pragmatic approach saved the team time.",
+        "The proposal is ambitious but not yet pragmatic.",
+        "He made a pragmatic decision based on the available budget.",
+        "A pragmatic plan includes a backup option."
+      ]
+    },
+    {
+      "term": "scrutinize",
+      "type": "verb",
+      "meaning": "To examine something very carefully.",
+      "explanation": "Use it when details need close attention before making a decision.",
+      "category": "Analysis",
+      "difficulty": "Advanced",
+      "examples": [
+        "The analyst scrutinized the report for unusual numbers.",
+        "Please scrutinize the contract before signing it.",
+        "The reviewers scrutinized every change in the proposal.",
+        "Customers may scrutinize the pricing before they buy.",
+        "We should scrutinize the assumptions behind this estimate."
+      ]
+    },
+    {
+      "term": "align on",
+      "type": "phrase",
+      "meaning": "To reach a shared understanding or agreement.",
+      "explanation": "Use it when people need to agree on a goal, plan, or next step.",
+      "category": "Meetings",
+      "difficulty": "Intermediate",
+      "examples": [
+        "Let’s align on the priorities before we start work.",
+        "The two teams need to align on the launch date.",
+        "We aligned on a simple plan for the first release.",
+        "Can we align on who owns each action item?",
+        "A short call helped everyone align on the next steps."
+      ]
+    }
+  ]
+}
