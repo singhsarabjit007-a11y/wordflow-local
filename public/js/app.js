@@ -116,7 +116,9 @@ function setCloudStatus(message, isError = false) {
 
 async function getCloudConfig() {
   try {
-    const response = await fetch('/api/config', { cache: 'no-store' });
+    // A distinct endpoint keeps this version independent of the legacy
+    // `config` function that an older Netlify deploy may still retain.
+    const response = await fetch('/api/cloud-sync-config', { cache: 'no-store' });
     if (!response.ok) throw new Error('Cloud configuration is unavailable.');
     const config = await response.json();
     if (!config.supabaseUrl || !config.supabasePublishableKey) throw new Error('Cloud configuration is incomplete.');
