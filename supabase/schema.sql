@@ -2,7 +2,7 @@
 -- Run this once in Supabase -> SQL Editor before deploying the cloud-enabled app.
 
 create table if not exists public.wordflow_device_state (
-  -- auth.users also contains anonymous users. The browser never chooses this ID.
+  -- Supabase assigns this ID after the user opens their passwordless email link.
   user_id uuid primary key references auth.users(id) on delete cascade,
   -- A complete, validated app snapshot keeps the cloud model intentionally small.
   payload jsonb not null default '{"items": [], "settings": {}}'::jsonb,
@@ -11,8 +11,8 @@ create table if not exists public.wordflow_device_state (
 
 alter table public.wordflow_device_state enable row level security;
 
--- Anonymous Supabase users receive the authenticated role after their silent
--- sign-in. They can read and write only the row whose ID matches their session.
+-- Passwordless email users receive the authenticated role after they open
+-- their sign-in link. They can read and write only their own cloud record.
 grant select, insert, update on public.wordflow_device_state to authenticated;
 
 drop policy if exists "device_state_select_own" on public.wordflow_device_state;
@@ -31,9 +31,9 @@ on public.wordflow_device_state for update to authenticated
 using ((select auth.uid()) = user_id)
 with check ((select auth.uid()) = user_id);
 
--- Closed-app push is scoped to the same anonymous device identity. Browser
--- subscription credentials are private, so RLS prevents one device from
--- reading or replacing another device's subscription.
+-- Closed-app push is scoped to the signed-in account. Browser subscription
+-- credentials are private, so RLS prevents another account from reading or
+-- replacing a device's subscription.
 create table if not exists public.wordflow_push_subscriptions (
   endpoint text primary key,
   user_id uuid not null references auth.users(id) on delete cascade,

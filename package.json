@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "A local-first vocabulary learning PWA with no account or backend.",
+  "description": "A local-first vocabulary PWA with passwordless Supabase cloud sync.",
   "scripts": {
     "check": "node --check public/js/app.js && node --check public/sw.js && node --check netlify/functions/config.mjs && node --check netlify/functions/cloud-sync-config.mjs && node --check netlify/functions/push-config.mjs && node --check netlify/functions/send-reminders.mjs && node tests/validate-sample.mjs && node tests/push-helpers.mjs"
   },

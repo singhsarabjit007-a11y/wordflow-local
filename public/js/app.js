@@ -1,7 +1,7 @@
 /*
  * WordFlow keeps an offline IndexedDB copy first, then silently syncs it to
- * Supabase when configured. There is no sign-in screen: Supabase anonymous
- * auth creates a device-scoped session in the background.
+ * Supabase when configured. A passwordless email link identifies the same
+ * person on each device without asking them to create or remember a password.
  */
 
 const DB_NAME = 'wordflow-local';
@@ -41,6 +41,8 @@ let reminderTimers = [];
 let deferredInstallPrompt = null;
 let supabaseClient = null;
 let supabaseSession = null;
+let cloudReadyForUserId = null;
+let cloudActivationForUserId = null;
 let cloudSyncTimer = null;
 let applyingCloudState = false;
 
@@ -114,6 +116,28 @@ function setCloudStatus(message, isError = false) {
   status.classList.toggle('error-text', isError);
 }
 
+// The app stays behind this small gate until Supabase knows whose private
+// cloud record it should read. This UI never deletes the offline copy.
+function showAuthGate(message = '', isError = false) {
+  hide($('appContent'));
+  hide($('bottomNav'));
+  show($('authGate'));
+  if (message) setAuthMessage(message, isError);
+}
+
+function showApplication() {
+  hide($('authGate'));
+  show($('appContent'));
+  show($('bottomNav'));
+}
+
+function setAuthMessage(message, isError = false) {
+  const status = $('authMessage');
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle('error-text', isError);
+}
+
 async function getCloudConfig() {
   try {
     // A distinct endpoint keeps this version independent of the legacy
@@ -145,30 +169,107 @@ async function getPushConfig() {
 
 async function initializeCloudSync() {
   const config = await getCloudConfig();
-  if (!config) { setCloudStatus('Cloud sync is not configured. Your data remains on this device.'); return; }
-  if (!window.supabase) { setCloudStatus('Cloud sync library could not load. Working offline.', true); return; }
+  if (!config) {
+    setCloudStatus('Cloud sync is not configured. Your data remains on this device.', true);
+    showAuthGate('Cloud setup needs attention. Please try again after the site is configured.', true);
+    return false;
+  }
+  if (!window.supabase) {
+    setCloudStatus('Cloud sync library could not load. Working offline.', true);
+    showAuthGate('Cloud sign-in could not load. Please refresh and try again.', true);
+    return false;
+  }
 
   try {
-    setCloudStatus('Connecting private device backup…');
+    setCloudStatus('Connecting your private backup…');
     supabaseClient = window.supabase.createClient(config.supabaseUrl, config.supabasePublishableKey, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+      // Supabase reads and safely removes the one-time magic-link token after
+      // the browser returns here. Subsequent launches use its saved session.
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
     });
     const { data: current, error: sessionError } = await supabaseClient.auth.getSession();
     if (sessionError) throw sessionError;
     supabaseSession = current.session;
+
+    // This also catches a successful magic-link return without requiring a
+    // page refresh. An expired session simply reveals the sign-in gate.
+    supabaseClient.auth.onAuthStateChange((_event, session) => {
+      supabaseSession = session;
+      if (!session) {
+        cloudReadyForUserId = null;
+        showAuthGate('Enter your email to continue syncing your WordFlow library.');
+        return;
+      }
+      void activateCloudSession();
+    });
+
     if (!supabaseSession) {
-      const { data, error } = await supabaseClient.auth.signInAnonymously();
-      if (error) throw error;
-      supabaseSession = data.session;
+      setCloudStatus('Sign in to sync your library across devices.');
+      showAuthGate('Enter your email and we’ll send a secure sign-in link.');
+      return false;
     }
-    if (!supabaseSession) throw new Error('Anonymous session was not created.');
-    supabaseClient.auth.onAuthStateChange((_event, session) => { supabaseSession = session; if (session) queueCloudSync(0); });
-    await reconcileCloudState();
-    if (settings.pushEnabled) void syncPushSubscription();
-    setCloudStatus('Cloud sync is active for this device.');
+    return activateCloudSession();
   } catch (error) {
     console.warn('WordFlow cloud sync unavailable:', error);
     setCloudStatus('Cloud setup needs attention. WordFlow is still working locally.', true);
+    showAuthGate('Cloud sign-in is unavailable. Please refresh and try again.', true);
+    return false;
+  }
+}
+
+async function activateCloudSession() {
+  const userId = supabaseSession?.user?.id;
+  if (!userId || cloudReadyForUserId === userId || cloudActivationForUserId === userId) return Boolean(cloudReadyForUserId === userId);
+  cloudActivationForUserId = userId;
+
+  try {
+    setCloudStatus('Syncing your private library…');
+    await reconcileCloudState();
+    // Ignore a slow response if the user changed accounts during that request.
+    if (supabaseSession?.user?.id !== userId) return false;
+    cloudReadyForUserId = userId;
+    if (settings.pushEnabled) void syncPushSubscription();
+    setCloudStatus('Cloud sync is active for your account.');
+  } catch (error) {
+    // A valid login must not lock a person out of their offline data if the
+    // network or Supabase is temporarily unavailable.
+    console.warn('WordFlow cloud reconciliation failed:', error);
+    setCloudStatus('Cloud sync needs attention. Your local copy is still available.', true);
+  } finally {
+    if (cloudActivationForUserId === userId) cloudActivationForUserId = null;
+  }
+
+  showApplication();
+  scheduleReminders();
+  navigate(location.hash.slice(1) || 'today');
+  return true;
+}
+
+async function sendMagicLink(event) {
+  event.preventDefault();
+  const email = $('emailInput').value.trim();
+  if (!email) return;
+  if (!supabaseClient) {
+    setAuthMessage('Cloud configuration is still loading. Please wait a moment and try again.', true);
+    return;
+  }
+
+  const button = $('magicLinkBtn');
+  button.disabled = true;
+  setAuthMessage('Sending your secure sign-in link…');
+  try {
+    const { error } = await supabaseClient.auth.signInWithOtp({
+      email,
+      // This must match the Site URL / Redirect URLs configured in Supabase.
+      options: { emailRedirectTo: window.location.origin }
+    });
+    if (error) throw error;
+    setAuthMessage('Check your inbox and open the WordFlow sign-in link on this device.');
+  } catch (error) {
+    console.warn('WordFlow magic link could not be sent:', error);
+    setAuthMessage(error.message || 'We could not send that sign-in link. Please try again.', true);
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -191,7 +292,10 @@ async function reconcileCloudState() {
   if (error) throw error;
   const remoteChangedAt = Date.parse(data?.payload?.settings?.lastChangedAt || data?.updated_at || 0);
   const localChangedAt = Date.parse(settings.lastChangedAt || 0);
-  if (data?.payload?.items && remoteChangedAt > localChangedAt) await applyCloudState(data.payload);
+  const localItems = await getAllItems();
+  // A fresh phone creates a local settings timestamp before it receives its
+  // session. If it has no vocabulary yet, prefer the existing cloud library.
+  if (Array.isArray(data?.payload?.items) && (localItems.length === 0 || remoteChangedAt > localChangedAt)) await applyCloudState(data.payload);
   else await uploadCloudState();
 }
 
@@ -241,6 +345,7 @@ function createReminderTimeFields() {
 }
 
 function wireEvents() {
+  $('magicLinkForm').addEventListener('submit', sendMagicLink);
   document.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.nav)));
   $('refreshTodayBtn').addEventListener('click', () => loadToday());
   $('knowBtn').addEventListener('click', () => updateTodayStatus('learned'));
@@ -579,7 +684,9 @@ function showToast(message, isError = false) { let toast = $('globalToast'); if 
 
 window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); deferredInstallPrompt = event; show($('installBtn')); });
 $('installBtn').addEventListener('click', async () => { if (!deferredInstallPrompt) return; deferredInstallPrompt.prompt(); await deferredInstallPrompt.userChoice; deferredInstallPrompt = null; hide($('installBtn')); });
-window.addEventListener('hashchange', () => navigate(location.hash.slice(1)));
+// Ignore the temporary hash used by a returning magic link until the cloud
+// session has completed its first safe download/upload reconciliation.
+window.addEventListener('hashchange', () => { if (cloudReadyForUserId) navigate(location.hash.slice(1)); });
 
 async function boot() {
   try {
@@ -587,9 +694,9 @@ async function boot() {
     if ('serviceWorker' in navigator) await navigator.serviceWorker.register('/sw.js');
     await loadSettings(); await upgradeStoredItems(); $('masterPrompt').textContent = MASTER_PROMPT;
     createManualExampleFields(); createReminderTimeFields(); wireEvents();
-    await initializeCloudSync();
-    scheduleReminders(); navigate(location.hash.slice(1) || 'today');
-  } catch (error) { console.error(error); document.querySelector('.content').textContent = `WordFlow could not start: ${error.message}`; }
+    const cloudReady = await initializeCloudSync();
+    if (cloudReady) { scheduleReminders(); navigate(location.hash.slice(1) || 'today'); }
+  } catch (error) { console.error(error); document.querySelector('.app-shell').textContent = `WordFlow could not start: ${error.message}`; }
 }
 
 boot();

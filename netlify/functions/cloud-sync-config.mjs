@@ -1,4 +1,4 @@
-// A versioned public-config endpoint for WordFlow's anonymous cloud sync.
+// A versioned public-config endpoint for WordFlow's email-linked cloud sync.
 // It exposes browser-safe Supabase values only; never add a service-role key.
 export default async () => {
   const required = ['SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY'];
