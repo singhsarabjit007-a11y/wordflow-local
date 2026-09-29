@@ -1,15 +1,8 @@
+# WordFlow V1 is a static PWA. It has no server functions or environment variables.
 [build]
   publish = "public"
-  functions = "netlify/functions"
 
-[functions]
-  node_bundler = "esbuild"
-
-[[redirects]]
-  from = "/api/config"
-  to = "/.netlify/functions/config"
-  status = 200
-
+# Let the installed app open any client-side route while preserving real files.
 [[redirects]]
   from = "/*"
   to = "/index.html"
@@ -20,16 +13,3 @@
   [headers.values]
     Cache-Control = "no-cache, no-store, must-revalidate"
     Service-Worker-Allowed = "/"
-
-[[headers]]
-  for = "/manifest.webmanifest"
-  [headers.values]
-    Content-Type = "application/manifest+json"
-    Cache-Control = "public, max-age=3600"
-
-[[headers]]
-  for = "/*"
-  [headers.values]
-    X-Content-Type-Options = "nosniff"
-    Referrer-Policy = "strict-origin-when-cross-origin"
-    Permissions-Policy = "camera=(), microphone=(), geolocation=()"

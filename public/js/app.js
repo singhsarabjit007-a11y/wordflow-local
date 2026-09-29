@@ -1,603 +1,337 @@
-const APP_TIME_ZONE = 'Asia/Kolkata';
-const NOTIFICATION_TIMES = ['09:00', '12:00', '15:00', '18:00', '21:00'];
-const MASTER_PROMPT = `Create a WordFlow V1 vocabulary learning pack as a downloadable JSON file.
+/*
+ * WordFlow V1 deliberately runs without a server, account, or API key.
+ * IndexedDB is the browser's durable local database: it survives refreshes and
+ * offline use, but data stays on this device until the user exports it.
+ */
 
-Topic: [REPLACE WITH WHAT I WANT TO LEARN]
+const DB_NAME = 'wordflow-local';
+const DB_VERSION = 1;
+const ITEM_STORE = 'items';
+const SETTINGS_STORE = 'settings';
+const DEFAULT_REMINDER_TIMES = ['09:00', '12:00', '15:00', '18:00', '21:00'];
+const VALID_STATUSES = new Set(['queued', 'active', 'review', 'learned']);
+
+const MASTER_PROMPT = `Create a WordFlow vocabulary learning pack as valid JSON.
+
+Topic: [REPLACE WITH A TOPIC]
 Difficulty: [Everyday professional / Intermediate / Advanced]
 Number of items: [10 / 20 / 30]
 
-The vocabulary should be genuinely useful in the requested context. It may include single words, phrasal verbs, business expressions, or sentence patterns. Avoid obvious/basic vocabulary unless it is especially useful.
-
-Return ONLY valid JSON using this exact schema:
+Return ONLY JSON with this exact shape:
 {
   "schema_version": 1,
-  "pack": {
-    "name": "Pack name",
-    "description": "Short description",
-    "topic": "Topic",
-    "difficulty": "Intermediate"
-  },
-  "items": [
-    {
-      "term": "align on",
-      "type": "phrase",
-      "meaning": "A concise meaning.",
-      "explanation": "A slightly fuller explanation of nuance and when to use it.",
-      "category": "IT Meetings",
-      "difficulty": "Intermediate",
-      "examples": [
-        "Example sentence 1.",
-        "Example sentence 2.",
-        "Example sentence 3.",
-        "Example sentence 4.",
-        "Example sentence 5."
-      ]
-    }
-  ]
+  "pack": { "name": "Pack name", "description": "Short description", "topic": "Topic", "difficulty": "Intermediate" },
+  "items": [{
+    "term": "align on", "type": "phrase", "meaning": "A concise meaning.",
+    "explanation": "A fuller explanation of how it is used.", "category": "IT meetings", "difficulty": "Intermediate",
+    "examples": ["Example 1.", "Example 2.", "Example 3.", "Example 4.", "Example 5."]
+  }]
 }
 
-Rules:
-- Exactly five natural example sentences per item.
-- Examples must fit the requested real-world context.
-- Do not include markdown fences, commentary, or text outside the JSON.
-- Avoid duplicate terms within the pack.`;
+Rules: exactly five natural examples per item; no markdown fences; no text outside JSON.`;
 
-let sb = null;
-let config = null;
-let session = null;
-let currentAssignment = null;
+let db;
+let settings;
+let currentTodayItem = null;
 let currentImport = null;
 let libraryFilter = 'all';
-let libraryCache = [];
+let reminderTimers = [];
 let deferredInstallPrompt = null;
 
 const $ = (id) => document.getElementById(id);
-const show = (el) => el?.classList.remove('hidden');
-const hide = (el) => el?.classList.add('hidden');
+const show = (element) => element?.classList.remove('hidden');
+const hide = (element) => element?.classList.add('hidden');
+const normalizeTerm = (value) => value.trim().toLocaleLowerCase().replace(/\s+/g, ' ');
+const todayKey = () => new Date().toLocaleDateString('en-CA');
+const uid = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-window.addEventListener('beforeinstallprompt', (event) => {
-  event.preventDefault();
-  deferredInstallPrompt = event;
-  show($('installBtn'));
-});
+/* IndexedDB's low-level API is wrapped once so feature code remains readable. */
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(ITEM_STORE)) {
+        const items = database.createObjectStore(ITEM_STORE, { keyPath: 'id' });
+        items.createIndex('normalizedTerm', 'normalizedTerm', { unique: true });
+        items.createIndex('status', 'status');
+        items.createIndex('queuePosition', 'queuePosition');
+      }
+      if (!database.objectStoreNames.contains(SETTINGS_STORE)) database.createObjectStore(SETTINGS_STORE, { keyPath: 'key' });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
 
-$('installBtn').addEventListener('click', async () => {
-  if (!deferredInstallPrompt) return;
-  deferredInstallPrompt.prompt();
-  await deferredInstallPrompt.userChoice;
-  deferredInstallPrompt = null;
-  hide($('installBtn'));
-});
+function transaction(storeName, mode = 'readonly') { return db.transaction(storeName, mode).objectStore(storeName); }
+function requestValue(request) { return new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
+async function getAllItems() { return requestValue(transaction(ITEM_STORE).getAll()); }
+async function getItem(id) { return requestValue(transaction(ITEM_STORE).get(id)); }
+async function saveItem(item) { return requestValue(transaction(ITEM_STORE, 'readwrite').put(item)); }
+async function removeItem(id) { return requestValue(transaction(ITEM_STORE, 'readwrite').delete(id)); }
+async function getSetting(key) { const row = await requestValue(transaction(SETTINGS_STORE).get(key)); return row?.value; }
+async function saveSetting(key, value) { return requestValue(transaction(SETTINGS_STORE, 'readwrite').put({ key, value })); }
 
-async function boot() {
-  try {
-    if ('serviceWorker' in navigator) await navigator.serviceWorker.register('/sw.js');
-    try {
-      const response = await fetch('/api/config', { cache: 'no-store' });
-      if (!response.ok) throw new Error('Missing Netlify public configuration.');
-      config = await response.json();
-      localStorage.setItem('wordflow-public-config', JSON.stringify(config));
-    } catch (networkError) {
-      const cached = localStorage.getItem('wordflow-public-config');
-      if (!cached) throw networkError;
-      config = JSON.parse(cached);
-    }
-    if (!config.supabaseUrl || !config.supabasePublishableKey || !config.vapidPublicKey) {
-      throw new Error('SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY and VAPID_PUBLIC_KEY must be configured in Netlify.');
-    }
+function defaultSettings() { return { reminderTimes: DEFAULT_REMINDER_TIMES, todayDate: null, todayItemId: null, remindersEnabled: false }; }
+async function loadSettings() { settings = { ...defaultSettings(), ...(await getSetting('app')) }; await persistSettings(); }
+async function persistSettings() { await saveSetting('app', settings); }
 
-    sb = window.supabase.createClient(config.supabaseUrl, config.supabasePublishableKey, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
-    });
-
-    const { data } = await sb.auth.getSession();
-    session = data.session;
-    sb.auth.onAuthStateChange((_event, nextSession) => {
-      session = nextSession;
-      renderAuthState();
-    });
-
-    $('masterPrompt').textContent = MASTER_PROMPT;
-    wireEvents();
-    renderAuthState();
-  } catch (error) {
-    console.error(error);
-    hide($('bootView'));
-    $('setupErrorText').textContent = error.message;
-    show($('setupErrorView'));
+function createManualExampleFields() {
+  const container = $('manualExamples');
+  container.replaceChildren();
+  for (let index = 1; index <= 5; index += 1) {
+    const input = document.createElement('input');
+    input.id = `manualExample${index}`;
+    input.required = true;
+    input.maxLength = 600;
+    input.placeholder = `Example sentence ${index}`;
+    input.setAttribute('aria-label', `Example sentence ${index}`);
+    container.appendChild(input);
   }
+}
+
+function createReminderTimeFields() {
+  const container = $('reminderTimes');
+  container.replaceChildren();
+  settings.reminderTimes.forEach((time, index) => {
+    const label = document.createElement('label');
+    label.textContent = `Reminder ${index + 1}`;
+    const input = document.createElement('input');
+    input.type = 'time'; input.value = time; input.required = true; input.dataset.reminderTime = String(index);
+    label.appendChild(input); container.appendChild(label);
+  });
 }
 
 function wireEvents() {
-  document.querySelectorAll('[data-nav]').forEach((btn) => btn.addEventListener('click', () => navigate(btn.dataset.nav)));
-  $('loginForm').addEventListener('submit', login);
-  $('signOutBtn').addEventListener('click', () => sb.auth.signOut());
-  $('refreshTodayBtn').addEventListener('click', loadToday);
-  $('knowBtn').addEventListener('click', () => setCurrentStatus('learned'));
-  $('skipBtn').addEventListener('click', () => setCurrentStatus('review'));
-  $('pushBtn').addEventListener('click', enablePush);
-  $('disablePushBtn').addEventListener('click', disablePush);
+  document.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.nav)));
+  $('refreshTodayBtn').addEventListener('click', () => loadToday());
+  $('knowBtn').addEventListener('click', () => updateTodayStatus('learned'));
+  $('reviewBtn').addEventListener('click', () => updateTodayStatus('review'));
+  $('notificationBtn').addEventListener('click', enableNotifications);
+  $('addWordForm').addEventListener('submit', addManualWord);
   $('jsonFileInput').addEventListener('change', readFileImport);
   $('previewPasteBtn').addEventListener('click', previewPastedImport);
-  $('clearImportBtn').addEventListener('click', clearImportPreview);
   $('importBtn').addEventListener('click', importPack);
   $('copyPromptBtn').addEventListener('click', copyMasterPrompt);
   $('librarySearch').addEventListener('input', renderLibrary);
+  $('settingsForm').addEventListener('submit', saveReminderTimes);
+  $('exportBtn').addEventListener('click', exportBackup);
+  $('restoreFileInput').addEventListener('change', restoreBackup);
   document.querySelectorAll('.filter-chip').forEach((chip) => chip.addEventListener('click', () => {
-    document.querySelectorAll('.filter-chip').forEach((c) => c.classList.remove('active'));
-    chip.classList.add('active');
-    libraryFilter = chip.dataset.filter;
-    renderLibrary();
+    document.querySelectorAll('.filter-chip').forEach((button) => button.classList.remove('active'));
+    chip.classList.add('active'); libraryFilter = chip.dataset.filter; renderLibrary();
   }));
 }
 
-async function renderAuthState() {
-  hide($('bootView'));
-  hide($('setupErrorView'));
-  if (!session) {
-    hide($('mainView'));
-    hide($('bottomNav'));
-    show($('authView'));
-    return;
-  }
-
-  hide($('authView'));
-  show($('mainView'));
-  show($('bottomNav'));
-  $('accountEmail').textContent = session.user.email || '';
-  navigate(location.hash.replace('#', '') || 'today');
-  await Promise.allSettled([loadToday(), loadQueue(), loadLibrary(), updatePushStatus()]);
-}
-
-async function login(event) {
-  event.preventDefault();
-  const email = $('emailInput').value.trim();
-  const button = event.submitter;
-  setBusy(button, true, 'Sending…');
-  const { error } = await sb.auth.signInWithOtp({
-    email,
-    options: { emailRedirectTo: `${location.origin}/` }
-  });
-  setBusy(button, false, 'Send sign-in link');
-  const box = $('authMessage');
-  box.className = 'message';
-  box.textContent = error ? error.message : 'Check your email for the WordFlow sign-in link.';
-  if (error) box.classList.add('error');
-  show(box);
-}
-
 function navigate(section) {
-  if (!session) return;
-  const valid = ['today', 'queue', 'library', 'import', 'settings'];
-  if (!valid.includes(section)) section = 'today';
-  document.querySelectorAll('[data-section]').forEach((s) => s.classList.toggle('hidden', s.dataset.section !== section));
-  document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.nav === section));
-  history.replaceState(null, '', `#${section}`);
-  if (section === 'queue') loadQueue();
-  if (section === 'library') loadLibrary();
+  const allowed = ['today', 'queue', 'library', 'add', 'import', 'settings'];
+  const target = allowed.includes(section) ? section : 'today';
+  document.querySelectorAll('[data-section]').forEach((element) => element.classList.toggle('hidden', element.dataset.section !== target));
+  document.querySelectorAll('.nav-item').forEach((button) => button.classList.toggle('active', button.dataset.nav === target));
+  history.replaceState(null, '', `#${target}`);
+  if (target === 'today') loadToday();
+  if (target === 'queue') renderQueue();
+  if (target === 'library') renderLibrary();
+  if (target === 'settings') createReminderTimeFields();
 }
 
-function indiaDateISO(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: APP_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit'
-  }).formatToParts(date);
-  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
-  return `${map.year}-${map.month}-${map.day}`;
-}
-
-function prettyToday() {
-  return new Intl.DateTimeFormat('en-IN', { timeZone: APP_TIME_ZONE, weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
+async function ensureTodayItem() {
+  const date = todayKey();
+  // A new date releases yesterday's unfinished active word into review. The
+  // selected word is stable for the whole day, even after marking it learned.
+  const isNewDay = settings.todayDate !== date;
+  if (isNewDay) {
+    if (settings.todayItemId) {
+      const previous = await getItem(settings.todayItemId);
+      if (previous?.status === 'active') await saveItem({ ...previous, status: 'review' });
+    }
+  }
+  // If the user opens an empty app in the morning and adds words later, choose
+  // the first one immediately instead of making them wait for the next day.
+  if (isNewDay || !settings.todayItemId) {
+    const queued = (await getAllItems()).filter((item) => item.status === 'queued').sort((a, b) => a.queuePosition - b.queuePosition)[0];
+    settings.todayDate = date; settings.todayItemId = queued?.id || null;
+    if (queued) await saveItem({ ...queued, status: 'active', startedOn: date });
+    await persistSettings();
+  }
+  return settings.todayItemId ? getItem(settings.todayItemId) : null;
 }
 
 async function loadToday() {
-  if (!session) return;
-  $('todayDate').textContent = prettyToday();
-  const date = indiaDateISO();
-
-  let { data: assignment, error } = await sb
-    .from('daily_assignments')
-    .select('id, learning_date, vocabulary_item_id, vocabulary_items(id, term, item_type, meaning, explanation, category, difficulty, status, examples(example_index, sentence))')
-    .eq('user_id', session.user.id)
-    .eq('learning_date', date)
-    .maybeSingle();
-
-  if (error) {
-    const cached = localStorage.getItem('wordflow-today');
-    if (cached) {
-      try {
-        const snapshot = JSON.parse(cached);
-        currentAssignment = { learning_date: snapshot.date, vocabulary_items: snapshot.item };
-        hide($('todayEmpty'));
-        show($('todayCard'));
-        renderToday(currentAssignment);
-        showToast('Offline: showing your last saved daily word.');
-        return;
-      } catch { /* ignore malformed cache */ }
-    }
-    return showToast(error.message, true);
-  }
-  if (!assignment) assignment = await createTodayAssignment(date);
-  currentAssignment = assignment;
-
-  if (!assignment) {
-    hide($('todayCard'));
-    show($('todayEmpty'));
-    return;
-  }
-  hide($('todayEmpty'));
-  show($('todayCard'));
-  renderToday(assignment);
+  $('todayDate').textContent = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
+  currentTodayItem = await ensureTodayItem();
+  if (!currentTodayItem) { hide($('todayCard')); show($('todayEmpty')); await updateNotificationStatus(); return; }
+  hide($('todayEmpty')); show($('todayCard'));
+  $('todayType').textContent = currentTodayItem.type;
+  $('todayDifficulty').textContent = currentTodayItem.difficulty || 'Personal queue';
+  $('todayTerm').textContent = currentTodayItem.term;
+  $('todayMeaning').textContent = currentTodayItem.meaning;
+  $('todayExplanation').textContent = currentTodayItem.explanation || '';
+  $('todayCategory').textContent = currentTodayItem.category || '';
+  $('todayExamples').replaceChildren(...currentTodayItem.examples.map((example) => { const item = document.createElement('li'); item.textContent = example; return item; }));
+  $('knowBtn').textContent = currentTodayItem.status === 'learned' ? '✓ Learned' : '✓ I know this';
+  $('reviewBtn').textContent = currentTodayItem.status === 'review' ? 'In review' : 'Review later';
+  await updateNotificationStatus();
 }
 
-async function createTodayAssignment(date) {
-  // If yesterday ended without the fifth push, do not leave that item permanently active.
-  await sb.from('vocabulary_items')
-    .update({ status: 'review' })
-    .eq('user_id', session.user.id)
-    .eq('status', 'active')
-    .lt('started_on', date);
-
-  const { data: next, error } = await sb
-    .from('vocabulary_items')
-    .select('id, term, item_type, meaning, explanation, category, difficulty, status, examples(example_index, sentence)')
-    .eq('user_id', session.user.id)
-    .eq('status', 'queued')
-    .order('queue_position', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  if (error) { showToast(error.message, true); return null; }
-  if (!next) return null;
-
-  const { data: inserted, error: insertError } = await sb
-    .from('daily_assignments')
-    .insert({ user_id: session.user.id, learning_date: date, vocabulary_item_id: next.id })
-    .select('id, learning_date, vocabulary_item_id')
-    .single();
-
-  if (insertError) {
-    // A scheduled notification may have created it milliseconds before us.
-    const { data: existing } = await sb
-      .from('daily_assignments')
-      .select('id, learning_date, vocabulary_item_id, vocabulary_items(id, term, item_type, meaning, explanation, category, difficulty, status, examples(example_index, sentence))')
-      .eq('user_id', session.user.id).eq('learning_date', date).maybeSingle();
-    return existing || null;
-  }
-
-  await sb.from('vocabulary_items').update({ status: 'active', started_on: date }).eq('id', next.id);
-  return { ...inserted, vocabulary_items: { ...next, status: 'active' } };
+async function updateTodayStatus(status) {
+  if (!currentTodayItem) return;
+  const updated = { ...currentTodayItem, status };
+  if (status === 'learned') updated.learnedAt = new Date().toISOString();
+  await saveItem(updated); currentTodayItem = updated;
+  showToast(status === 'learned' ? 'Great work — this word is now learned.' : 'Added to your review list.');
+  await Promise.all([loadToday(), renderQueue(), renderLibrary()]);
 }
 
-function renderToday(assignment) {
-  const item = assignment.vocabulary_items;
-  if (!item) return;
-  $('todayTerm').textContent = item.term;
-  $('todayType').textContent = item.item_type;
-  $('todayDifficulty').textContent = item.difficulty || 'Unspecified';
-  $('todayMeaning').textContent = item.meaning;
-  $('todayExplanation').textContent = item.explanation || '';
-  $('todayCategory').textContent = item.category || '';
-  const list = $('todayExamples');
-  list.innerHTML = '';
-  [...(item.examples || [])].sort((a,b) => a.example_index - b.example_index).forEach((example) => {
-    const li = document.createElement('li');
-    li.textContent = example.sentence;
-    list.appendChild(li);
-  });
-  const snapshot = { date: assignment.learning_date, item };
-  localStorage.setItem('wordflow-today', JSON.stringify(snapshot));
+function buildItem(raw, queuePosition) {
+  return { id: uid(), term: raw.term.trim(), normalizedTerm: normalizeTerm(raw.term), type: raw.type.trim(), meaning: raw.meaning.trim(), explanation: (raw.explanation || '').trim(), category: (raw.category || '').trim(), difficulty: (raw.difficulty || '').trim(), examples: raw.examples.map((example) => example.trim()), status: 'queued', queuePosition, createdAt: new Date().toISOString(), startedOn: null, learnedAt: null };
 }
 
-async function setCurrentStatus(status) {
-  const item = currentAssignment?.vocabulary_items;
-  if (!item) return;
-  const updates = { status };
-  if (status === 'learned') updates.learned_at = new Date().toISOString();
-  const { error } = await sb.from('vocabulary_items').update(updates).eq('id', item.id);
-  if (error) return showToast(error.message, true);
-  item.status = status;
-  showToast(status === 'learned' ? 'Marked as learned.' : 'Moved to review. Tomorrow will use the next queued item.');
-  await Promise.all([loadQueue(), loadLibrary()]);
+async function addManualWord(event) {
+  event.preventDefault();
+  const raw = { term: $('addTerm').value, type: $('addType').value, meaning: $('addMeaning').value, explanation: $('addExplanation').value, category: $('addCategory').value, difficulty: $('addDifficulty').value, examples: [1, 2, 3, 4, 5].map((number) => $(`manualExample${number}`).value) };
+  try {
+    validateItem(raw, 'This word');
+    if ((await getAllItems()).some((item) => item.normalizedTerm === normalizeTerm(raw.term))) throw new Error('That word is already in your library.');
+    await saveItem(buildItem(raw, Date.now())); event.target.reset(); showToast('Added to your learning queue.'); await loadToday(); navigate('today');
+  } catch (error) { showToast(error.message, true); }
 }
 
-async function loadQueue() {
-  if (!session) return;
-  const { data, error } = await sb
-    .from('vocabulary_items')
-    .select('id, term, item_type, meaning, category, difficulty, queue_position')
-    .eq('user_id', session.user.id)
-    .eq('status', 'queued')
-    .order('queue_position', { ascending: true });
-  if (error) return showToast(error.message, true);
-  const target = $('queueList');
-  target.innerHTML = '';
-  (data || []).forEach((item, idx) => {
-    const el = buildListItem(item, `${idx + 1} · ${item.item_type} · ${item.category || 'General'}`);
-    const button = miniButton('Learn next', () => moveToTop(item.id));
-    el.querySelector('.list-actions').appendChild(button);
-    target.appendChild(el);
-  });
-  $('queueEmpty').classList.toggle('hidden', (data || []).length !== 0);
-}
-
-async function moveToTop(id) {
-  const topPosition = Date.now() * -1;
-  const { error } = await sb.from('vocabulary_items').update({ queue_position: topPosition }).eq('id', id);
-  if (error) return showToast(error.message, true);
-  showToast('Moved to the top of your queue.');
-  loadQueue();
-}
-
-async function loadLibrary() {
-  if (!session) return;
-  const { data, error } = await sb
-    .from('vocabulary_items')
-    .select('id, term, item_type, meaning, category, difficulty, status, created_at')
-    .eq('user_id', session.user.id)
-    .order('created_at', { ascending: false });
-  if (error) return showToast(error.message, true);
-  libraryCache = data || [];
-  $('libraryCount').textContent = `${libraryCache.length} item${libraryCache.length === 1 ? '' : 's'}`;
-  renderLibrary();
-}
-
-function renderLibrary() {
-  const query = ($('librarySearch')?.value || '').trim().toLowerCase();
-  const filtered = libraryCache.filter((item) => {
-    const matchesStatus = libraryFilter === 'all' || item.status === libraryFilter || (libraryFilter === 'review' && item.status === 'active');
-    const haystack = `${item.term} ${item.meaning} ${item.category || ''} ${item.item_type}`.toLowerCase();
-    return matchesStatus && (!query || haystack.includes(query));
-  });
-  const target = $('libraryList');
-  target.innerHTML = '';
-  filtered.forEach((item) => {
-    const el = buildListItem(item, `${item.status} · ${item.item_type} · ${item.category || 'General'}`);
-    if (item.status !== 'learned') el.querySelector('.list-actions').appendChild(miniButton('Learned', () => markItemLearned(item.id)));
-    target.appendChild(el);
-  });
-}
-
-async function markItemLearned(id) {
-  const { error } = await sb.from('vocabulary_items').update({ status: 'learned', learned_at: new Date().toISOString() }).eq('id', id);
-  if (error) return showToast(error.message, true);
-  await Promise.all([loadLibrary(), loadQueue()]);
-}
-
-function buildListItem(item, meta) {
-  const node = $('listItemTemplate').content.cloneNode(true);
-  node.querySelector('.list-term').textContent = item.term;
-  node.querySelector('.list-meta').textContent = meta;
-  node.querySelector('.list-meaning').textContent = item.meaning;
-  return node.firstElementChild;
-}
-
-function miniButton(label, handler) {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'mini-btn';
-  button.textContent = label;
-  button.addEventListener('click', handler);
-  return button;
-}
-
-async function readFileImport(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  try { previewImport(JSON.parse(await file.text())); }
-  catch (error) { showToast(`Invalid JSON file: ${error.message}`, true); }
-}
-
-function previewPastedImport() {
-  try { previewImport(JSON.parse($('jsonPaste').value)); }
-  catch (error) { showToast(`Invalid pasted JSON: ${error.message}`, true); }
+function validateItem(item, name = 'Item') {
+  if (!item?.term?.trim() || !item.type?.trim() || !item.meaning?.trim()) throw new Error(`${name} needs a term, type and meaning.`);
+  if (!Array.isArray(item.examples) || item.examples.length !== 5 || item.examples.some((example) => typeof example !== 'string' || !example.trim())) throw new Error(`${name} needs exactly five non-empty example sentences.`);
 }
 
 function validatePack(payload) {
-  if (!payload || payload.schema_version !== 1) throw new Error('schema_version must be 1.');
-  if (!payload.pack?.name || !Array.isArray(payload.items) || payload.items.length === 0) throw new Error('Pack name and at least one item are required.');
-  if (payload.items.length > 200) throw new Error('V1 accepts a maximum of 200 items per import.');
-  for (const [index, item] of payload.items.entries()) {
-    if (!item.term || !item.type || !item.meaning) throw new Error(`Item ${index + 1} is missing term, type or meaning.`);
-    if (!Array.isArray(item.examples) || item.examples.length !== 5 || item.examples.some((x) => typeof x !== 'string' || !x.trim())) {
-      throw new Error(`“${item.term}” must contain exactly five non-empty example sentences.`);
-    }
-  }
-  return payload;
+  if (payload?.schema_version !== 1 || !payload.pack?.name || !Array.isArray(payload.items) || !payload.items.length) throw new Error('This is not a valid WordFlow pack.');
+  if (payload.items.length > 200) throw new Error('A pack can contain at most 200 items.');
+  payload.items.forEach((item, index) => validateItem(item, `Item ${index + 1}`)); return payload;
 }
 
+async function readFileImport(event) { const file = event.target.files?.[0]; if (!file) return; try { previewImport(JSON.parse(await file.text())); } catch (error) { showToast(`Could not read that JSON: ${error.message}`, true); } }
+function previewPastedImport() { try { previewImport(JSON.parse($('jsonPaste').value)); } catch (error) { showToast(`Could not read that JSON: ${error.message}`, true); } }
 function previewImport(payload) {
   currentImport = validatePack(payload);
   $('previewPackName').textContent = currentImport.pack.name;
   $('previewPackMeta').textContent = `${currentImport.items.length} items · ${currentImport.pack.difficulty || 'Mixed difficulty'} · ${currentImport.pack.topic || 'General'}`;
-  const target = $('previewTerms');
-  target.innerHTML = '';
-  currentImport.items.forEach((item) => {
-    const pill = document.createElement('span');
-    pill.textContent = item.term;
-    target.appendChild(pill);
-  });
-  hide($('importMessage'));
-  show($('importPreview'));
-}
-
-function clearImportPreview() {
-  currentImport = null;
-  $('jsonFileInput').value = '';
-  $('jsonPaste').value = '';
-  hide($('importPreview'));
+  $('previewTerms').replaceChildren(...currentImport.items.map((item) => { const chip = document.createElement('span'); chip.textContent = item.term; return chip; }));
+  hide($('importMessage')); show($('importPreview'));
 }
 
 async function importPack() {
   if (!currentImport) return;
-  const button = $('importBtn');
-  setBusy(button, true, 'Importing…');
-  const resultBox = $('importMessage');
-  resultBox.className = 'message';
-
-  const { data: pack, error: packError } = await sb.from('learning_packs').insert({
-    user_id: session.user.id,
-    name: currentImport.pack.name,
-    description: currentImport.pack.description || '',
-    topic: currentImport.pack.topic || '',
-    difficulty: currentImport.pack.difficulty || ''
-  }).select('id').single();
-
-  if (packError) {
-    setBusy(button, false, 'Import into my queue');
-    return showImportError(packError.message);
+  const existing = new Set((await getAllItems()).map((item) => item.normalizedTerm));
+  let imported = 0; let skipped = 0; let position = Date.now();
+  for (const raw of currentImport.items) {
+    const normalized = normalizeTerm(raw.term);
+    if (existing.has(normalized)) { skipped += 1; continue; }
+    await saveItem(buildItem({ ...raw, category: raw.category || currentImport.pack.topic, difficulty: raw.difficulty || currentImport.pack.difficulty }, position));
+    existing.add(normalized); imported += 1; position += 1;
   }
-
-  const { data: last } = await sb.from('vocabulary_items').select('queue_position').eq('user_id', session.user.id).order('queue_position', { ascending: false }).limit(1).maybeSingle();
-  let nextPosition = Math.max(Number(last?.queue_position || 0) + 100, Date.now());
-  let imported = 0;
-  let skipped = 0;
-
-  for (const item of currentImport.items) {
-    const normalized = normalizeTerm(item.term);
-    const { data: inserted, error } = await sb.from('vocabulary_items').insert({
-      user_id: session.user.id,
-      pack_id: pack.id,
-      term: item.term.trim(),
-      term_normalized: normalized,
-      item_type: item.type.trim(),
-      meaning: item.meaning.trim(),
-      explanation: (item.explanation || '').trim(),
-      category: (item.category || currentImport.pack.topic || '').trim(),
-      difficulty: (item.difficulty || currentImport.pack.difficulty || '').trim(),
-      status: 'queued',
-      queue_position: nextPosition
-    }).select('id').single();
-
-    if (error) {
-      if (error.code === '23505') { skipped++; continue; }
-      setBusy(button, false, 'Import into my queue');
-      return showImportError(`Import stopped at “${item.term}”: ${error.message}`);
-    }
-
-    const examples = item.examples.map((sentence, idx) => ({
-      user_id: session.user.id,
-      vocabulary_item_id: inserted.id,
-      example_index: idx + 1,
-      sentence: sentence.trim()
-    }));
-    const { error: examplesError } = await sb.from('examples').insert(examples);
-    if (examplesError) {
-      setBusy(button, false, 'Import into my queue');
-      return showImportError(`Could not save examples for “${item.term}”: ${examplesError.message}`);
-    }
-    imported++;
-    nextPosition += 100;
-  }
-
-  resultBox.textContent = `Imported ${imported} item${imported === 1 ? '' : 's'}${skipped ? `; skipped ${skipped} duplicate${skipped === 1 ? '' : 's'}` : ''}.`;
-  show(resultBox);
-  setBusy(button, false, 'Import into my queue');
-  await Promise.all([loadQueue(), loadLibrary(), loadToday()]);
+  $('importMessage').className = 'message'; $('importMessage').textContent = `Imported ${imported} word${imported === 1 ? '' : 's'}${skipped ? `; skipped ${skipped} duplicate${skipped === 1 ? '' : 's'}` : ''}.`; show($('importMessage'));
+  await Promise.all([loadToday(), renderQueue(), renderLibrary()]);
 }
 
-function showImportError(message) {
-  const box = $('importMessage');
-  box.className = 'message error';
-  box.textContent = message;
-  show(box);
+function makeListRow(item, actionLabel, action) {
+  const row = document.createElement('article'); row.className = 'list-item';
+  const main = document.createElement('div'); main.className = 'list-main';
+  const term = document.createElement('div'); term.className = 'list-term'; term.textContent = item.term;
+  const meta = document.createElement('div'); meta.className = 'list-meta'; meta.textContent = `${item.type} · ${item.status}`;
+  const meaning = document.createElement('div'); meaning.className = 'list-meaning'; meaning.textContent = item.meaning;
+  main.append(term, meta, meaning); row.appendChild(main);
+  if (actionLabel) { const button = document.createElement('button'); button.className = 'mini-btn'; button.textContent = actionLabel; button.addEventListener('click', action); row.appendChild(button); }
+  return row;
 }
 
-function normalizeTerm(value) {
-  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+async function renderQueue() {
+  const items = (await getAllItems()).filter((item) => item.status === 'queued').sort((a, b) => a.queuePosition - b.queuePosition);
+  $('queueList').replaceChildren(...items.map((item) => makeListRow(item, 'Remove', async () => { await removeItem(item.id); showToast('Removed from the queue.'); renderQueue(); renderLibrary(); })));
+  items.length ? hide($('queueEmpty')) : show($('queueEmpty'));
 }
 
-async function copyMasterPrompt() {
-  await navigator.clipboard.writeText(MASTER_PROMPT);
-  showToast('Prompt copied.');
+async function renderLibrary() {
+  const query = $('librarySearch').value.trim().toLocaleLowerCase();
+  const all = await getAllItems();
+  const visible = all.filter((item) => (libraryFilter === 'all' || item.status === libraryFilter) && `${item.term} ${item.meaning} ${item.category}`.toLocaleLowerCase().includes(query)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  $('libraryCount').textContent = `${all.length} word${all.length === 1 ? '' : 's'}`;
+  $('libraryList').replaceChildren(...visible.map((item) => makeListRow(item, item.status === 'learned' ? 'Learn again' : 'Mark learned', async () => { await saveItem({ ...item, status: item.status === 'learned' ? 'review' : 'learned', learnedAt: item.status === 'learned' ? null : new Date().toISOString() }); renderLibrary(); renderQueue(); loadToday(); })));
 }
 
-function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = atob(base64);
-  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
+async function enableNotifications() {
+  if (!('Notification' in window)) return showToast('This browser does not support notifications.', true);
+  const permission = await Notification.requestPermission(); settings.remindersEnabled = permission === 'granted'; await persistSettings(); scheduleReminders(); await updateNotificationStatus();
+  showToast(permission === 'granted' ? 'Reminders enabled while WordFlow is open.' : 'Notification permission was not granted.', permission !== 'granted');
 }
 
-async function enablePush() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return showToast('Push notifications are not supported in this browser.', true);
-  const permission = await Notification.requestPermission();
-  if (permission !== 'granted') return updatePushStatus();
-
-  const registration = await navigator.serviceWorker.ready;
-  let subscription = await registration.pushManager.getSubscription();
-  if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(config.vapidPublicKey)
-    });
-  }
-  const json = subscription.toJSON();
-  const row = {
-    user_id: session.user.id,
-    endpoint: subscription.endpoint,
-    p256dh: json.keys?.p256dh,
-    auth: json.keys?.auth,
-    user_agent: navigator.userAgent
-  };
-  const { error } = await sb.from('push_subscriptions').upsert(row, { onConflict: 'endpoint' });
-  if (error) return showToast(error.message, true);
-  await sb.from('user_settings').update({ notifications_enabled: true }).eq('user_id', session.user.id);
-  showToast('Daily notifications enabled.');
-  updatePushStatus();
+async function updateNotificationStatus() {
+  const enabled = settings.remindersEnabled && globalThis.Notification?.permission === 'granted';
+  $('notificationBtn').textContent = enabled ? 'Enabled' : 'Enable'; $('notificationBtn').disabled = enabled;
+  $('notificationStatus').textContent = enabled ? `Enabled · ${settings.reminderTimes.join(', ')}` : `Not enabled · ${settings.reminderTimes.join(', ')}`;
 }
 
-async function disablePush() {
+function scheduleReminders() {
+  // Timers cannot wake a closed browser. This transparent V1 implementation is
+  // local by design; real closed-app push is intentionally deferred.
+  reminderTimers.forEach(clearTimeout); reminderTimers = [];
+  if (!settings.remindersEnabled || Notification.permission !== 'granted') return;
+  settings.reminderTimes.forEach((time, index) => {
+    const [hour, minute] = time.split(':').map(Number); const next = new Date(); next.setHours(hour, minute, 0, 0); if (next <= new Date()) next.setDate(next.getDate() + 1);
+    reminderTimers.push(setTimeout(async () => { await showReminder(index); scheduleReminders(); }, next - Date.now()));
+  });
+}
+
+async function showReminder(exampleIndex) {
+  const item = await ensureTodayItem(); if (!item) return;
+  const options = { body: item.examples[exampleIndex] || item.meaning, icon: '/icons/icon-192.png', tag: `wordflow-${todayKey()}-${exampleIndex}`, data: { url: '/#today' } };
+  const registration = await navigator.serviceWorker?.ready;
+  if (registration) registration.showNotification(`${item.term} — example ${exampleIndex + 1}`, options); else new Notification(item.term, options);
+}
+
+async function saveReminderTimes(event) {
+  event.preventDefault(); const times = [...document.querySelectorAll('[data-reminder-time]')].map((input) => input.value);
+  if (times.some((time) => !/^\d{2}:\d{2}$/.test(time)) || new Set(times).size !== 5) return showToast('Choose five different reminder times.', true);
+  settings.reminderTimes = times.sort(); await persistSettings(); scheduleReminders(); await updateNotificationStatus(); showToast('Reminder times saved.');
+}
+
+async function exportBackup() {
+  const backup = { wordflowBackupVersion: 1, exportedAt: new Date().toISOString(), settings, items: await getAllItems() };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
+  const link = document.createElement('a'); link.href = url; link.download = `wordflow-backup-${todayKey()}.json`; link.click(); URL.revokeObjectURL(url); showBackupMessage('Backup downloaded. Keep it somewhere safe.');
+}
+
+async function restoreBackup(event) {
+  const file = event.target.files?.[0]; if (!file) return;
   try {
-    const registration = await navigator.serviceWorker.ready;
-    const subscription = await registration.pushManager.getSubscription();
-    if (subscription) {
-      await sb.from('push_subscriptions').delete().eq('endpoint', subscription.endpoint);
-      await subscription.unsubscribe();
+    const backup = JSON.parse(await file.text());
+    if (backup?.wordflowBackupVersion !== 1 || !Array.isArray(backup.items) || !backup.settings) throw new Error('This is not a WordFlow backup.');
+    if (!window.confirm('Restore this backup? It will replace the WordFlow data on this device.')) return;
+    // Each helper uses its own short transaction. This avoids reusing an
+    // IndexedDB transaction after an awaited operation has completed it.
+    await requestValue(transaction(ITEM_STORE, 'readwrite').clear());
+    for (const item of backup.items) {
+      if (!VALID_STATUSES.has(item.status)) throw new Error('The backup contains an invalid item status.');
+      await saveItem(item);
     }
-    await sb.from('user_settings').update({ notifications_enabled: false }).eq('user_id', session.user.id);
-    showToast('Push notifications disabled.');
-    updatePushStatus();
-  } catch (error) { showToast(error.message, true); }
+    settings = { ...defaultSettings(), ...backup.settings }; await persistSettings(); createReminderTimeFields(); scheduleReminders(); await Promise.all([loadToday(), renderQueue(), renderLibrary(), updateNotificationStatus()]); showBackupMessage('Backup restored successfully.');
+  } catch (error) { showBackupMessage(error.message, true); } finally { event.target.value = ''; }
 }
 
-async function updatePushStatus() {
-  if (!session) return;
-  let text = `Scheduled: ${NOTIFICATION_TIMES.join(', ')} IST.`;
-  let enabled = false;
-  if ('serviceWorker' in navigator && 'PushManager' in window) {
-    const registration = await navigator.serviceWorker.ready;
-    const sub = await registration.pushManager.getSubscription();
-    enabled = Notification.permission === 'granted' && !!sub;
-  }
-  $('pushStatus').textContent = enabled ? `Enabled · ${text}` : `Not enabled · ${text}`;
-  $('pushBtn').textContent = enabled ? 'Enabled' : 'Enable';
-  $('pushBtn').disabled = enabled;
+function showBackupMessage(message, isError = false) { $('backupMessage').className = `message${isError ? ' error' : ''}`; $('backupMessage').textContent = message; show($('backupMessage')); }
+async function copyMasterPrompt() { try { await navigator.clipboard.writeText(MASTER_PROMPT); showToast('Prompt copied.'); } catch { showToast('Could not copy the prompt.', true); } }
+function showToast(message, isError = false) { let toast = $('globalToast'); if (!toast) { toast = document.createElement('div'); toast.id = 'globalToast'; document.body.appendChild(toast); } toast.className = `toast${isError ? ' error' : ''}`; toast.textContent = message; show(toast); clearTimeout(window.wordflowToastTimer); window.wordflowToastTimer = setTimeout(() => hide(toast), 3200); }
+
+window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); deferredInstallPrompt = event; show($('installBtn')); });
+$('installBtn').addEventListener('click', async () => { if (!deferredInstallPrompt) return; deferredInstallPrompt.prompt(); await deferredInstallPrompt.userChoice; deferredInstallPrompt = null; hide($('installBtn')); });
+window.addEventListener('hashchange', () => navigate(location.hash.slice(1)));
+
+async function boot() {
+  try {
+    db = await openDatabase();
+    if ('serviceWorker' in navigator) await navigator.serviceWorker.register('/sw.js');
+    await loadSettings(); $('masterPrompt').textContent = MASTER_PROMPT;
+    createManualExampleFields(); createReminderTimeFields(); wireEvents(); scheduleReminders(); navigate(location.hash.slice(1) || 'today');
+  } catch (error) { console.error(error); document.querySelector('.content').textContent = `WordFlow could not start: ${error.message}`; }
 }
 
-function setBusy(button, busy, label) {
-  if (!button) return;
-  button.disabled = busy;
-  button.textContent = label;
-}
-
-function showToast(message, isError = false) {
-  let toast = document.getElementById('globalToast');
-  if (!toast) {
-    toast = document.createElement('div');
-    toast.id = 'globalToast';
-    Object.assign(toast.style, {
-      position: 'fixed', left: '50%', bottom: '92px', transform: 'translateX(-50%)',
-      zIndex: 99, maxWidth: '92vw', padding: '11px 15px', borderRadius: '12px',
-      boxShadow: '0 10px 28px rgba(0,0,0,.12)', fontWeight: 650, fontSize: '.86rem'
-    });
-    document.body.appendChild(toast);
-  }
-  toast.style.background = isError ? '#7c3737' : '#274b55';
-  toast.style.color = 'white';
-  toast.textContent = message;
-  toast.style.display = 'block';
-  clearTimeout(window.__toastTimer);
-  window.__toastTimer = setTimeout(() => { toast.style.display = 'none'; }, 3000);
-}
-
-window.addEventListener('hashchange', () => session && navigate(location.hash.replace('#', '') || 'today'));
 boot();
