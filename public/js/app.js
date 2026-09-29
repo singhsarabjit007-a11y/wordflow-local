@@ -1,7 +1,7 @@
 /*
- * WordFlow V1 deliberately runs without a server, account, or API key.
- * IndexedDB is the browser's durable local database: it survives refreshes and
- * offline use, but data stays on this device until the user exports it.
+ * WordFlow keeps an offline IndexedDB copy first, then silently syncs it to
+ * Supabase when configured. There is no sign-in screen: Supabase anonymous
+ * auth creates a device-scoped session in the background.
  */
 
 const DB_NAME = 'wordflow-local';
@@ -39,6 +39,10 @@ let currentImport = null;
 let libraryFilter = 'all';
 let reminderTimers = [];
 let deferredInstallPrompt = null;
+let supabaseClient = null;
+let supabaseSession = null;
+let cloudSyncTimer = null;
+let applyingCloudState = false;
 
 const $ = (id) => document.getElementById(id);
 const show = (element) => element?.classList.remove('hidden');
@@ -71,14 +75,28 @@ function transaction(storeName, mode = 'readonly') { return db.transaction(store
 function requestValue(request) { return new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
 async function getAllItems() { return requestValue(transaction(ITEM_STORE).getAll()); }
 async function getItem(id) { return requestValue(transaction(ITEM_STORE).get(id)); }
-async function saveItem(item) { return requestValue(transaction(ITEM_STORE, 'readwrite').put(item)); }
-async function removeItem(id) { return requestValue(transaction(ITEM_STORE, 'readwrite').delete(id)); }
+async function saveItem(item) { const result = await requestValue(transaction(ITEM_STORE, 'readwrite').put(item)); recordLocalChange(); return result; }
+async function removeItem(id) { const result = await requestValue(transaction(ITEM_STORE, 'readwrite').delete(id)); recordLocalChange(); return result; }
 async function getSetting(key) { const row = await requestValue(transaction(SETTINGS_STORE).get(key)); return row?.value; }
 async function saveSetting(key, value) { return requestValue(transaction(SETTINGS_STORE, 'readwrite').put({ key, value })); }
 
-function defaultSettings() { return { reminderTimes: DEFAULT_REMINDER_TIMES, todayDate: null, todayItemId: null, remindersEnabled: false }; }
-async function loadSettings() { settings = { ...defaultSettings(), ...(await getSetting('app')) }; await persistSettings(); }
-async function persistSettings() { await saveSetting('app', settings); }
+function defaultSettings() { return { reminderTimes: DEFAULT_REMINDER_TIMES, todayDate: null, todayItemId: null, remindersEnabled: false, lastChangedAt: null }; }
+async function loadSettings() {
+  const saved = await getSetting('app');
+  settings = { ...defaultSettings(), ...saved };
+  // A first launch needs a timestamp; existing local/cloud state must keep its
+  // original timestamp so the newer copy can win during reconciliation.
+  if (!saved) await persistSettings();
+}
+async function persistSettings() { settings.lastChangedAt = new Date().toISOString(); await saveSetting('app', settings); queueCloudSync(); }
+
+function recordLocalChange() {
+  // During a download from Supabase, do not immediately upload that same state.
+  if (applyingCloudState || !settings) return;
+  settings.lastChangedAt = new Date().toISOString();
+  void saveSetting('app', settings);
+  queueCloudSync();
+}
 
 async function upgradeStoredItems() {
   // Existing V1 users keep their data when new optional fields are introduced.
@@ -86,6 +104,99 @@ async function upgradeStoredItems() {
     if (item.isFavorite === undefined || item.reviewStage === undefined || item.reviewDueDate === undefined) {
       await saveItem({ isFavorite: false, reviewStage: null, reviewDueDate: null, ...item });
     }
+  }
+}
+
+function setCloudStatus(message, isError = false) {
+  const status = $('cloudStatus');
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle('error-text', isError);
+}
+
+async function getCloudConfig() {
+  try {
+    const response = await fetch('/api/config', { cache: 'no-store' });
+    if (!response.ok) throw new Error('Cloud configuration is unavailable.');
+    const config = await response.json();
+    if (!config.supabaseUrl || !config.supabasePublishableKey) throw new Error('Cloud configuration is incomplete.');
+    localStorage.setItem('wordflow-cloud-config', JSON.stringify(config));
+    return config;
+  } catch (error) {
+    // A previously received public config lets the PWA reconnect after an
+    // offline launch. It contains no secret and is safe to cache locally.
+    const cached = localStorage.getItem('wordflow-cloud-config');
+    if (cached) return JSON.parse(cached);
+    return null;
+  }
+}
+
+async function initializeCloudSync() {
+  const config = await getCloudConfig();
+  if (!config) { setCloudStatus('Cloud sync is not configured. Your data remains on this device.'); return; }
+  if (!window.supabase) { setCloudStatus('Cloud sync library could not load. Working offline.', true); return; }
+
+  try {
+    setCloudStatus('Connecting private device backup…');
+    supabaseClient = window.supabase.createClient(config.supabaseUrl, config.supabasePublishableKey, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+    });
+    const { data: current, error: sessionError } = await supabaseClient.auth.getSession();
+    if (sessionError) throw sessionError;
+    supabaseSession = current.session;
+    if (!supabaseSession) {
+      const { data, error } = await supabaseClient.auth.signInAnonymously();
+      if (error) throw error;
+      supabaseSession = data.session;
+    }
+    if (!supabaseSession) throw new Error('Anonymous session was not created.');
+    supabaseClient.auth.onAuthStateChange((_event, session) => { supabaseSession = session; if (session) queueCloudSync(0); });
+    await reconcileCloudState();
+    setCloudStatus('Cloud sync is active for this device.');
+  } catch (error) {
+    console.warn('WordFlow cloud sync unavailable:', error);
+    setCloudStatus('Cloud setup needs attention. WordFlow is still working locally.', true);
+  }
+}
+
+function queueCloudSync(delay = 700) {
+  if (applyingCloudState || !supabaseClient || !supabaseSession) return;
+  clearTimeout(cloudSyncTimer);
+  cloudSyncTimer = setTimeout(() => { void uploadCloudState(); }, delay);
+}
+
+async function uploadCloudState() {
+  if (!supabaseClient || !supabaseSession || applyingCloudState) return;
+  const payload = { items: await getAllItems(), settings };
+  const { error } = await supabaseClient.from('wordflow_device_state').upsert({ user_id: supabaseSession.user.id, payload }, { onConflict: 'user_id' });
+  if (error) { console.warn('WordFlow cloud upload failed:', error); setCloudStatus('Cloud sync could not save. Working locally.', true); return; }
+  setCloudStatus(`Cloud sync active · saved ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+}
+
+async function reconcileCloudState() {
+  const { data, error } = await supabaseClient.from('wordflow_device_state').select('payload, updated_at').eq('user_id', supabaseSession.user.id).maybeSingle();
+  if (error) throw error;
+  const remoteChangedAt = Date.parse(data?.payload?.settings?.lastChangedAt || data?.updated_at || 0);
+  const localChangedAt = Date.parse(settings.lastChangedAt || 0);
+  if (data?.payload?.items && remoteChangedAt > localChangedAt) await applyCloudState(data.payload);
+  else await uploadCloudState();
+}
+
+async function applyCloudState(payload) {
+  if (!Array.isArray(payload.items) || !payload.settings) throw new Error('Cloud backup has an invalid format.');
+  applyingCloudState = true;
+  try {
+    await requestValue(transaction(ITEM_STORE, 'readwrite').clear());
+    // Direct writes intentionally bypass saveItem so this download does not
+    // trigger a competing upload while it is still being applied.
+    for (const item of payload.items) await requestValue(transaction(ITEM_STORE, 'readwrite').put(item));
+    settings = { ...defaultSettings(), ...payload.settings };
+    await saveSetting('app', settings);
+    createReminderTimeFields();
+    scheduleReminders();
+    await Promise.all([loadToday(), renderQueue(), renderReviews(), renderLibrary(), updateNotificationStatus()]);
+  } finally {
+    applyingCloudState = false;
   }
 }
 
@@ -406,7 +517,9 @@ async function boot() {
     db = await openDatabase();
     if ('serviceWorker' in navigator) await navigator.serviceWorker.register('/sw.js');
     await loadSettings(); await upgradeStoredItems(); $('masterPrompt').textContent = MASTER_PROMPT;
-    createManualExampleFields(); createReminderTimeFields(); wireEvents(); scheduleReminders(); navigate(location.hash.slice(1) || 'today');
+    createManualExampleFields(); createReminderTimeFields(); wireEvents();
+    await initializeCloudSync();
+    scheduleReminders(); navigate(location.hash.slice(1) || 'today');
   } catch (error) { console.error(error); document.querySelector('.content').textContent = `WordFlow could not start: ${error.message}`; }
 }
 

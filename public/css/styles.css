@@ -173,6 +173,7 @@ button:disabled { opacity: .55; cursor: wait; }
 .prompt-panel pre { white-space: pre-wrap; background: #f5f7f5; border: 1px solid var(--border); border-radius: 13px; padding: 14px; font-size: .78rem; overflow: auto; }
 .message { margin-top: 12px; padding: 10px 12px; border-radius: 11px; background: var(--surface-2); font-size: .86rem; }
 .message.error { background: #f7e9e9; color: #7c3737; }
+.error-text { color: #9b4545; }
 
 .spinner { width: 30px; height: 30px; margin: 0 auto 14px; border-radius: 50%; border: 3px solid var(--border); border-top-color: var(--accent); animation: spin .75s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

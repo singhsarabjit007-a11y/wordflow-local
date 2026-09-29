@@ -1,6 +1,12 @@
-# WordFlow V1 is a static PWA. It has no server functions or environment variables.
+# WordFlow uses one small public-config function; Supabase secrets never reach the browser.
 [build]
   publish = "public"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/config"
+  to = "/.netlify/functions/config"
+  status = 200
 
 # Let the installed app open any client-side route while preserving real files.
 [[redirects]]

@@ -1,81 +1,74 @@
-# WordFlow V1
+# WordFlow
 
 **One word. Five real-world uses. Every day.**
 
-WordFlow is a personal, installable vocabulary-learning PWA. V1 is deliberately
-local-first: it has no account, authentication, database server, API key,
-Netlify Function, or environment variable.
+WordFlow is an installable vocabulary-learning PWA. It always keeps an offline
+copy of its data in IndexedDB. When configured, it silently syncs that data to
+Supabase using an anonymous device session—there is no login screen, email,
+password, or magic link.
 
-Your words, progress and settings are stored in IndexedDB in the browser where
-you use the app. Export a backup before clearing browser data or moving to a
-new device.
+## What is included
 
-## V1 features
+- Daily word with a meaning, explanation, grammar type and five examples
+- Manual word entry and JSON pack import
+- Queue, expanded library search, favourites and browser pronunciation
+- Spaced reviews at 1, 3, 7, 21 and 60 days
+- Five configurable local reminders while the PWA is open
+- Offline cache plus export/restore backups
+- Secure Supabase cloud sync for the current anonymous device session
 
-- Installable PWA that works offline after the first visit
-- One daily word or phrase with type, meaning, explanation and five examples
-- Add a word manually or import a JSON vocabulary pack
-- Queue, searchable library and status filters
-- Search words by term, meaning, explanation, category, type or difficulty
-- Save favourite words for quick filtering
-- Browser pronunciation using the device's built-in text-to-speech voice
-- Spaced repetition reviews at 1, 3, 7, 21 and 60 days
-- Mark words learned or put them in review
-- Five configurable local reminder times
-- Browser notification permission (reminders fire while WordFlow is open)
-- Export and restore a complete local backup
+## Anonymous Supabase identity
 
-## Important V1 boundary
+Supabase needs an identity to make Row Level Security work. WordFlow uses
+**anonymous authentication** automatically on first launch. This is invisible
+to the user, but it gives the browser a private device-scoped session so it can
+read only its own cloud record.
 
-Web browsers cannot reliably run local timers after the PWA/browser is closed.
-For that reason, V1 reminders run while WordFlow is open. Real push
-notifications for a closed app are a future feature and require a backend that
-stores browser push subscriptions.
+Anonymous sessions do **not** transfer to a new device. Keep using Export as a
+backup, or add an optional account-linking feature later if cross-device access
+is required.
 
-## Deploy to Netlify
+## One-time Supabase setup
 
-1. Push this repository to GitHub.
-2. In Netlify, use **Add new project → Import an existing project**.
-3. Select this repository and deploy. Netlify reads `netlify.toml`.
-4. No build command, Supabase project, VAPID key, or environment variable is
-   needed.
-5. Make sure Netlify's Site/Team Protection is disabled if anyone should be
-   able to open the PWA URL without a Netlify account.
+1. Create a Supabase project.
+2. In **Authentication → Providers**, enable **Anonymous sign-ins**.
+3. In **SQL Editor**, run [`supabase/schema.sql`](supabase/schema.sql).
+4. In **Project Settings → API**, copy the project URL and **Publishable key**.
 
-## Import format
+Never put a Supabase service-role key in this project, the browser, or Netlify.
+WordFlow does not need one for the current cloud-sync feature.
 
-The included [`sample-packs/it-meetings-starter.json`](sample-packs/it-meetings-starter.json)
-is ready to import. Packs use this shape:
+## Netlify setup
 
-```json
-{
-  "schema_version": 1,
-  "pack": { "name": "IT meetings", "topic": "Work", "difficulty": "Intermediate" },
-  "items": [{
-    "term": "align on",
-    "type": "phrase",
-    "meaning": "Reach a shared understanding.",
-    "explanation": "Use it when people need to agree on a plan.",
-    "category": "IT meetings",
-    "difficulty": "Intermediate",
-    "examples": ["One.", "Two.", "Three.", "Four.", "Five."]
-  }]
-}
+1. Import this GitHub repository into Netlify.
+2. Netlify reads `netlify.toml`; leave the build command empty.
+3. Add these environment variables under **Project configuration → Environment variables**:
+
+```text
+SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+SUPABASE_PUBLISHABLE_KEY=your_publishable_key
 ```
 
-Every item must have exactly five non-empty example sentences.
+4. Trigger a new deploy.
+5. Open WordFlow → **Settings**. It should say that cloud sync is active.
+
+The publishable key is intentionally available to the browser. Security comes
+from Supabase RLS policies in `supabase/schema.sql`, not from hiding that key.
+
+## Import a pack
+
+Use [`sample-packs/feature-test-pack.json`](sample-packs/feature-test-pack.json)
+to test the Import screen. Every vocabulary item needs exactly five examples.
+
+## Current boundaries
+
+- Closed-app push notifications are not included yet. Supabase sync makes them
+  practical to add next, alongside browser push subscriptions and scheduled
+  Netlify Functions.
+- Browser pronunciation uses the device's built-in text-to-speech voice.
 
 ## Verify the source
 
 ```bash
 npm run check
 ```
-
-This validates the PWA JavaScript syntax and the included sample pack.
-
-## Later ideas
-
-- Reliable closed-app push notifications
-- Cloud backup and multi-device sync
-- AI-created packs and sentence feedback
-- Categories, favourites and learning statistics
