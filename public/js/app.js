@@ -120,6 +120,7 @@ function wireEvents() {
   $('refreshTodayBtn').addEventListener('click', () => loadToday());
   $('knowBtn').addEventListener('click', () => updateTodayStatus('learned'));
   $('reviewBtn').addEventListener('click', () => updateTodayStatus('review'));
+  $('nextWordBtn').addEventListener('click', advanceToNextWord);
   $('speakBtn').addEventListener('click', pronounceTodayWord);
   $('favoriteBtn').addEventListener('click', () => currentTodayItem && toggleFavorite(currentTodayItem));
   $('notificationBtn').addEventListener('click', enableNotifications);
@@ -188,6 +189,8 @@ async function loadToday() {
   $('knowBtn').textContent = currentTodayItem.reviewStage !== null ? '✓ Review plan set' : '✓ I know this';
   $('reviewBtn').textContent = currentTodayItem.status === 'review' ? 'In review' : 'Review later';
   $('favoriteBtn').textContent = currentTodayItem.isFavorite ? '★ Saved' : '☆ Save';
+  // Do not force people to wait until tomorrow once they have finished today’s word.
+  currentTodayItem.status === 'review' || currentTodayItem.status === 'learned' ? show($('nextWordBtn')) : hide($('nextWordBtn'));
   await updateNotificationStatus();
 }
 
@@ -201,6 +204,16 @@ async function updateTodayStatus(status) {
   await saveItem(updated); currentTodayItem = updated;
   showToast(status === 'learned' ? 'Added to your 1, 3, 7, 21, 60-day review plan.' : 'Added to your review list.');
   await Promise.all([loadToday(), renderQueue(), renderReviews(), renderLibrary()]);
+}
+
+async function advanceToNextWord() {
+  if (!currentTodayItem || !['review', 'learned'].includes(currentTodayItem.status)) return;
+  // Clearing only the current assignment preserves every completed/review item
+  // and makes ensureTodayItem select the next queued word on this same date.
+  settings.todayItemId = null;
+  await persistSettings();
+  await Promise.all([loadToday(), renderQueue(), renderLibrary()]);
+  showToast(currentTodayItem ? 'Next word is ready.' : 'Your learning queue is empty.');
 }
 
 function scheduleFirstReview(item) {
