@@ -80,7 +80,7 @@ async function removeItem(id) { const result = await requestValue(transaction(IT
 async function getSetting(key) { const row = await requestValue(transaction(SETTINGS_STORE).get(key)); return row?.value; }
 async function saveSetting(key, value) { return requestValue(transaction(SETTINGS_STORE, 'readwrite').put({ key, value })); }
 
-function defaultSettings() { return { reminderTimes: DEFAULT_REMINDER_TIMES, todayDate: null, todayItemId: null, remindersEnabled: false, lastChangedAt: null }; }
+function defaultSettings() { return { reminderTimes: DEFAULT_REMINDER_TIMES, todayDate: null, todayItemId: null, remindersEnabled: false, pushEnabled: false, lastChangedAt: null }; }
 async function loadSettings() {
   const saved = await getSetting('app');
   settings = { ...defaultSettings(), ...saved };
@@ -133,6 +133,16 @@ async function getCloudConfig() {
   }
 }
 
+// The VAPID public key identifies WordFlow to the browser push service. Unlike
+// the private VAPID key, it is designed to be sent to the installed PWA.
+async function getPushConfig() {
+  const response = await fetch('/api/push-config', { cache: 'no-store' });
+  if (!response.ok) throw new Error('Push notification configuration is unavailable.');
+  const config = await response.json();
+  if (!config.vapidPublicKey) throw new Error('Push notification configuration is incomplete.');
+  return config;
+}
+
 async function initializeCloudSync() {
   const config = await getCloudConfig();
   if (!config) { setCloudStatus('Cloud sync is not configured. Your data remains on this device.'); return; }
@@ -154,6 +164,7 @@ async function initializeCloudSync() {
     if (!supabaseSession) throw new Error('Anonymous session was not created.');
     supabaseClient.auth.onAuthStateChange((_event, session) => { supabaseSession = session; if (session) queueCloudSync(0); });
     await reconcileCloudState();
+    if (settings.pushEnabled) void syncPushSubscription();
     setCloudStatus('Cloud sync is active for this device.');
   } catch (error) {
     console.warn('WordFlow cloud sync unavailable:', error);
@@ -170,7 +181,7 @@ function queueCloudSync(delay = 700) {
 async function uploadCloudState() {
   if (!supabaseClient || !supabaseSession || applyingCloudState) return;
   const payload = { items: await getAllItems(), settings };
-  const { error } = await supabaseClient.from('wordflow_device_state').upsert({ user_id: supabaseSession.user.id, payload }, { onConflict: 'user_id' });
+  const { error } = await supabaseClient.from('wordflow_device_state').upsert({ user_id: supabaseSession.user.id, payload, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
   if (error) { console.warn('WordFlow cloud upload failed:', error); setCloudStatus('Cloud sync could not save. Working locally.', true); return; }
   setCloudStatus(`Cloud sync active · saved ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
 }
@@ -196,6 +207,7 @@ async function applyCloudState(payload) {
     await saveSetting('app', settings);
     createReminderTimeFields();
     scheduleReminders();
+    if (settings.pushEnabled) void syncPushSubscription();
     await Promise.all([loadToday(), renderQueue(), renderReviews(), renderLibrary(), updateNotificationStatus()]);
   } finally {
     applyingCloudState = false;
@@ -447,22 +459,75 @@ function pronounceTodayWord() {
   window.speechSynthesis.speak(utterance);
 }
 
+function urlBase64ToUint8Array(value) {
+  const padded = `${value}${'='.repeat((4 - (value.length % 4)) % 4)}`.replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(padded);
+  return Uint8Array.from(raw, (character) => character.charCodeAt(0));
+}
+
+function deviceTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
+async function syncPushSubscription() {
+  if (!settings.pushEnabled || !supabaseClient || !supabaseSession || Notification.permission !== 'granted') return false;
+  if (!('PushManager' in window) || !navigator.serviceWorker) return false;
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  if (!subscription) return false;
+  const { error } = await supabaseClient.from('wordflow_push_subscriptions').upsert({
+    endpoint: subscription.endpoint,
+    user_id: supabaseSession.user.id,
+    subscription: subscription.toJSON(),
+    reminder_times: settings.reminderTimes,
+    timezone: deviceTimeZone(),
+    active: true,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'endpoint' });
+  if (error) throw error;
+  return true;
+}
+
 async function enableNotifications() {
-  if (!('Notification' in window)) return showToast('This browser does not support notifications.', true);
-  const permission = await Notification.requestPermission(); settings.remindersEnabled = permission === 'granted'; await persistSettings(); scheduleReminders(); await updateNotificationStatus();
-  showToast(permission === 'granted' ? 'Reminders enabled while WordFlow is open.' : 'Notification permission was not granted.', permission !== 'granted');
+  if (!('Notification' in window) || !('PushManager' in window) || !navigator.serviceWorker) return showToast('This browser does not support closed-app push notifications.', true);
+  if (!supabaseClient || !supabaseSession) return showToast('Cloud sync must be active before enabling closed-app reminders.', true);
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') return showToast('Notification permission was not granted.', true);
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      const { vapidPublicKey } = await getPushConfig();
+      subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) });
+    }
+    settings.remindersEnabled = true;
+    settings.pushEnabled = true;
+    await persistSettings();
+    await syncPushSubscription();
+    scheduleReminders();
+    await updateNotificationStatus();
+    showToast('Closed-app reminders are enabled for this device.');
+  } catch (error) {
+    console.warn('WordFlow push subscription failed:', error);
+    settings.pushEnabled = false;
+    await persistSettings();
+    await updateNotificationStatus();
+    showToast('Could not enable closed-app reminders. Check the push setup and try again.', true);
+  }
 }
 
 async function updateNotificationStatus() {
-  const enabled = settings.remindersEnabled && globalThis.Notification?.permission === 'granted';
-  $('notificationBtn').textContent = enabled ? 'Enabled' : 'Enable'; $('notificationBtn').disabled = enabled;
-  $('notificationStatus').textContent = enabled ? `Enabled · ${settings.reminderTimes.join(', ')}` : `Not enabled · ${settings.reminderTimes.join(', ')}`;
+  const enabled = settings.pushEnabled && globalThis.Notification?.permission === 'granted';
+  $('notificationBtn').textContent = enabled ? 'Enabled' : 'Enable';
+  $('notificationBtn').disabled = enabled;
+  $('notificationStatus').textContent = enabled ? `Closed-app reminders enabled · ${settings.reminderTimes.join(', ')}` : `Not enabled · ${settings.reminderTimes.join(', ')}`;
 }
 
 function scheduleReminders() {
-  // Timers cannot wake a closed browser. This transparent V1 implementation is
-  // local by design; real closed-app push is intentionally deferred.
   reminderTimers.forEach(clearTimeout); reminderTimers = [];
+  // A subscribed device receives server push even while closed. Retaining this
+  // lightweight fallback helps a local-only/offline copy still remind users.
+  if (settings.pushEnabled) return;
   if (!settings.remindersEnabled || Notification.permission !== 'granted') return;
   settings.reminderTimes.forEach((time, index) => {
     const [hour, minute] = time.split(':').map(Number); const next = new Date(); next.setHours(hour, minute, 0, 0); if (next <= new Date()) next.setDate(next.getDate() + 1);
@@ -479,8 +544,10 @@ async function showReminder(exampleIndex) {
 
 async function saveReminderTimes(event) {
   event.preventDefault(); const times = [...document.querySelectorAll('[data-reminder-time]')].map((input) => input.value);
-  if (times.some((time) => !/^\d{2}:\d{2}$/.test(time)) || new Set(times).size !== 5) return showToast('Choose five different reminder times.', true);
-  settings.reminderTimes = times.sort(); await persistSettings(); scheduleReminders(); await updateNotificationStatus(); showToast('Reminder times saved.');
+  if (times.some((time) => !/^\d{2}:\d{2}$/.test(time) || Number(time.slice(3)) % 5 !== 0) || new Set(times).size !== 5) return showToast('Choose five different times on five-minute boundaries.', true);
+  settings.reminderTimes = times.sort(); await persistSettings(); scheduleReminders();
+  try { await syncPushSubscription(); } catch (error) { console.warn('Could not update push reminder times:', error); }
+  await updateNotificationStatus(); showToast('Reminder times saved.');
 }
 
 async function exportBackup() {

@@ -8,6 +8,11 @@
   to = "/.netlify/functions/cloud-sync-config"
   status = 200
 
+[[redirects]]
+  from = "/api/push-config"
+  to = "/.netlify/functions/push-config"
+  status = 200
+
 # Let the installed app open any client-side route while preserving real files.
 [[redirects]]
   from = "/*"

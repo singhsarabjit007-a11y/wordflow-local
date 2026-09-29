@@ -1,7 +1,7 @@
 // Static cache only: WordFlow does not make API calls or store cloud data.
 // Increment this when the static app shell changes, so installed PWAs fetch
 // the new JavaScript and interface instead of continuing to use an old shell.
-const CACHE_NAME = 'wordflow-cloud-v2';
+const CACHE_NAME = 'wordflow-push-v1';
 const STATIC_ASSETS = ['/', '/index.html', '/css/styles.css', '/js/app.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -30,5 +30,20 @@ self.addEventListener('notificationclick', (event) => {
     const openClient = clients[0];
     if (openClient) return openClient.focus();
     return self.clients.openWindow('/#today');
+  }));
+});
+
+// Push events are delivered to the service worker, so this still runs when
+// WordFlow's browser tab and installed PWA window are both closed.
+self.addEventListener('push', (event) => {
+  const fallback = { title: 'WordFlow reminder', body: 'Open WordFlow for today’s word.', url: '/#today' };
+  let payload = fallback;
+  try { payload = { ...fallback, ...event.data?.json() }; } catch { /* A malformed push still gets a useful reminder. */ }
+  event.waitUntil(self.registration.showNotification(payload.title, {
+    body: payload.body,
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    tag: payload.tag || 'wordflow-reminder',
+    data: { url: payload.url || '/#today' }
   }));
 });
