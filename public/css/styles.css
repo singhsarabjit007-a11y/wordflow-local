@@ -1,7 +1,8 @@
 :root { --bg:#f7f4ec; --surface:#fffdfa; --text:#141414; --muted:#6c6c6c; --line:#dedbd3; --soft:#efede7; --shadow:0 12px 34px rgba(30,26,18,.055); --safe-bottom:env(safe-area-inset-bottom,0px); }
 * { box-sizing:border-box; }
 html, body { min-height:100%; background:var(--bg); }
-body { margin:0; color:var(--text); font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height:1.45; }
+html { -webkit-text-size-adjust:100%; text-size-adjust:100%; }
+body { margin:0; overflow-x:hidden; color:var(--text); font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height:1.45; }
 button, input, textarea { font:inherit; }
 button { cursor:pointer; }
 .hidden { display:none !important; }
@@ -20,17 +21,22 @@ button:disabled { opacity:.55; cursor:wait; }
 
 /* Today */
 .today-screen { display:flex; min-height:calc(100dvh - 146px); flex-direction:column; }
-.today-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
-.progress-track { width:min(58vw,320px); height:10px; margin-top:17px; overflow:hidden; border-radius:999px; background:#e6e3dd; }
+.today-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.today-head > :first-child { min-width:0; flex:1; }
+.progress-track { width:min(100%,320px); height:10px; margin-top:17px; overflow:hidden; border-radius:999px; background:#e6e3dd; }
 .progress-track span { display:block; width:25%; height:100%; border-radius:inherit; background:#b9b6ae; }
-.sync-indicator { display:grid; justify-items:center; gap:7px; min-width:82px; text-align:center; }
+.sync-indicator { display:grid; justify-items:center; gap:6px; min-width:112px; text-align:center; }
 .sync-btn { display:grid; width:48px; height:48px; place-items:center; border:1px solid var(--line); border-radius:50%; background:rgba(255,255,255,.5); font-size:1.7rem; line-height:1; }
+.sync-btn.is-syncing { animation:sync-spin .8s linear infinite; }
 .sync-status,.small-status { max-width:118px; color:var(--muted); font-size:.72rem; line-height:1.25; }
+.sync-status { max-width:140px; font-size:.68rem; white-space:nowrap; }
 .word-stage { display:grid; flex:1; align-content:center; justify-items:center; padding:55px 0 74px; text-align:center; }
 .term { max-width:100%; overflow-wrap:anywhere; font-size:clamp(3.2rem,15vw,6rem); }
 .word-type { margin:9px 0 27px; color:#828282; font-family:Georgia,serif; font-size:1.45rem; font-style:italic; }
 .pronunciation { display:flex; align-items:center; gap:11px; border:0; border-radius:999px; padding:11px 18px; background:rgba(255,255,255,.72); color:var(--text); font-size:1.15rem; }
 .meaning { max-width:620px; margin-top:27px; color:var(--text); font-size:clamp(1.35rem,5.1vw,2rem); }
+.use-note { max-width:590px; margin:13px auto 0; font-size:.9rem; }
+.use-note:not(:empty)::before { color:var(--text); content:"When to use it · "; font-weight:750; }
 .today-actions { display:grid; width:100%; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin-top:88px; }
 .word-action { display:grid; min-width:0; justify-items:center; gap:10px; border:0; background:transparent; color:var(--text); }
 .word-action > span { display:grid; width:52px; height:52px; place-items:center; border-radius:50%; background:var(--soft); font-size:2rem; line-height:1; }
@@ -76,7 +82,7 @@ button:disabled { opacity:.55; cursor:wait; }
 .import-title,.settings-title { display:flex; align-items:center; gap:15px; margin-bottom:18px; }
 .import-title > span,.settings-title > span { font-size:2rem; }
 .import-title p,.settings-title p { margin-top:5px; font-size:.85rem; }
-textarea { width:100%; min-height:126px; margin:0 0 12px; border:0; border-radius:16px; outline:0; resize:vertical; padding:14px; background:#f4f2ed; color:#555; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:.78rem; }
+textarea { width:100%; min-height:126px; margin:0 0 12px; border:0; border-radius:16px; outline:0; resize:vertical; padding:14px; background:#f4f2ed; color:#555; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:.8rem; }
 .preview-terms,.synonym-chips { display:flex; flex-wrap:wrap; gap:8px; margin:13px 0 18px; }
 .preview-terms span,.synonym-chips span { border-radius:999px; padding:7px 11px; background:var(--soft); font-size:.8rem; }
 .prompt-link { display:block; width:100%; border:0; background:transparent; color:#545454; text-decoration:underline; font-family:Georgia,serif; font-size:1rem; }
@@ -105,7 +111,7 @@ textarea { width:100%; min-height:126px; margin:0 0 12px; border:0; border-radiu
 /* Details bottom sheet */
 .details-overlay { position:fixed; z-index:50; inset:0; }
 .details-backdrop { position:absolute; inset:0; width:100%; border:0; background:rgba(20,20,20,.36); }
-.details-panel { position:absolute; right:0; bottom:0; left:0; max-height:78dvh; overflow:auto; padding:14px 23px calc(30px + var(--safe-bottom)); border-radius:30px 30px 0 0; background:var(--surface); box-shadow:0 -12px 42px rgba(0,0,0,.15); }
+.details-panel { position:absolute; right:0; bottom:0; left:0; max-height:86dvh; overflow:auto; padding:14px 23px calc(30px + var(--safe-bottom)); border-radius:30px 30px 0 0; background:var(--surface); box-shadow:0 -12px 42px rgba(0,0,0,.15); }
 .sheet-handle { width:48px; height:6px; margin:0 auto 20px; border-radius:999px; background:#d7d7d7; }
 .close-details { position:absolute; top:18px; right:20px; border:0; background:transparent; color:var(--text); font-size:2.5rem; line-height:.7; }
 .details-panel > h1 { margin:0 36px 27px 0; font-size:2.55rem; }
@@ -126,5 +132,40 @@ textarea { width:100%; min-height:126px; margin:0 0 12px; border:0; border-radiu
 .auth-panel .small-status { max-width:none; margin-top:13px; }
 .toast { position:fixed; z-index:90; bottom:96px; left:50%; max-width:90vw; transform:translateX(-50%); padding:11px 14px; border-radius:12px; background:var(--text); color:white; font-size:.84rem; }
 .toast.error { background:#7c3737; }
+
+@keyframes sync-spin { to { transform:rotate(360deg); } }
+
+/* Import and Settings are the two utility screens people should be able to
+   use in one glance. The denser layout avoids vertical scrolling on phones. */
+#importSection .page-heading,#settingsSection .page-heading { margin:10px 0 16px; }
+#importSection .page-heading h1,#settingsSection .page-heading h1 { font-size:clamp(2.35rem,10vw,3.45rem); }
+#importSection .page-heading > p { margin-top:4px; font-size:.9rem; }
+#importSection .import-card,#settingsSection .settings-card { margin-bottom:10px; padding:15px 17px; border-radius:20px; }
+#importSection .primary-import { display:grid; grid-template-columns:48px minmax(0,1fr); justify-items:start; column-gap:12px; padding:16px 17px; text-align:left; }
+#importSection .primary-import .import-icon { grid-row:span 3; width:48px; height:48px; margin:0; font-size:1.55rem; }
+#importSection .primary-import h2 { align-self:end; font-size:1.45rem; }
+#importSection .primary-import p { align-self:start; margin:0; font-size:.83rem; }
+#importSection .primary-import .file-button { margin-top:9px; }
+#importSection .outline-btn { padding:9px 15px; }
+#importSection .import-title,#settingsSection .settings-title { gap:10px; margin-bottom:10px; }
+#importSection .import-title > span,#settingsSection .settings-title > span { font-size:1.55rem; }
+#importSection .import-title h2,#settingsSection .settings-title h2 { font-size:1.38rem; }
+#importSection .import-title p,#settingsSection .settings-title p { margin-top:1px; font-size:.78rem; }
+#importSection .import-card p { margin-bottom:9px; }
+#importSection textarea { min-height:64px; height:64px; margin-bottom:8px; padding:9px 11px; font-size:.72rem; }
+#importSection .prompt-link { font-size:.88rem; }
+#settingsSection .time-grid { gap:8px; margin-bottom:10px; }
+#settingsSection .time-grid input { border-radius:13px; padding:9px 10px; font-size:1rem; }
+#settingsSection .time-grid label::after { top:7px; right:10px; font-size:1.1rem; }
+#settingsSection .reminder-notification { margin-top:8px; }
+#settingsSection .backup-actions { gap:8px; }
+#settingsSection .backup-actions .outline-btn { padding:8px 5px; font-size:.78rem; }
+#settingsSection .small-status { font-size:.68rem; }
+
+@media (max-height:720px) {
+  #importSection .page-heading,#settingsSection .page-heading { margin-top:0; margin-bottom:10px; }
+  #importSection .import-card,#settingsSection .settings-card { padding-top:12px; padding-bottom:12px; }
+  #settingsSection .settings-title { margin-bottom:7px; }
+}
 
 @media (max-width:430px) { .content { padding-right:16px; padding-left:16px; } .today-actions { gap:6px; } .word-action > span { width:47px; height:47px; font-size:1.72rem; } .word-action small { font-size:.67rem; } .row-copy strong { font-size:1.42rem; } .row-copy span { font-size:.9rem; } }

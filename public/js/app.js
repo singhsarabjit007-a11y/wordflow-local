@@ -235,7 +235,7 @@ async function activateCloudSession() {
     if (supabaseSession?.user?.id !== userId) return false;
     cloudReadyForUserId = userId;
     if (settings.pushEnabled) void syncPushSubscription();
-    setCloudStatus('Cloud sync is active for your account.');
+    setCloudStatus('Live sync active');
     void startCloudRealtime();
   } catch (error) {
     // A valid login must not lock a person out of their offline data if the
@@ -291,7 +291,7 @@ async function uploadCloudState() {
   const payload = { items: await getAllItems(), settings };
   const { error } = await supabaseClient.from('wordflow_device_state').upsert({ user_id: supabaseSession.user.id, payload, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
   if (error) { console.warn('WordFlow cloud upload failed:', error); setCloudStatus('Cloud sync could not save. Working locally.', true); return false; }
-  setCloudStatus(`Cloud sync active · saved ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+  setCloudStatus(`Synced ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
   return true;
 }
 
@@ -325,7 +325,7 @@ async function startCloudRealtime() {
       event: '*', schema: 'public', table: 'wordflow_device_state', filter: `user_id=eq.${userId}`
     }, (change) => { void applyRealtimeCloudChange(change.new); })
     .subscribe((status) => {
-      if (status === 'SUBSCRIBED') setCloudStatus('Live sync active · listening for changes.');
+      if (status === 'SUBSCRIBED') setCloudStatus('Live sync active');
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setCloudStatus('Live sync disconnected. Use Sync now while it reconnects.', true);
     });
 }
@@ -345,7 +345,7 @@ async function applyRealtimeCloudChange(remoteRecord) {
   if (!Array.isArray(remoteRecord.payload.items) || remoteChangedAt <= localChangedAt) return;
   try {
     await applyCloudState(remoteRecord.payload);
-    setCloudStatus(`Live sync active · updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+    setCloudStatus(`Synced ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
   } catch (error) {
     console.warn('WordFlow live update could not be applied:', error);
     setCloudStatus('A live update could not be applied. Use Sync now to retry.', true);
@@ -356,13 +356,14 @@ async function syncNow() {
   if (!supabaseClient || !supabaseSession) return showToast('Sign in before syncing your library.', true);
   const button = $('syncNowBtn');
   button.disabled = true;
-  button.textContent = 'Syncing…';
+  button.classList.add('is-syncing');
+  button.setAttribute('aria-busy', 'true');
   setCloudStatus('Syncing now…');
   try {
     const synced = await reconcileCloudState();
     if (!synced) return;
     if (settings.pushEnabled) await syncPushSubscription();
-    setCloudStatus(`Live sync active · checked ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+    setCloudStatus(`Synced ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
     showToast('Library is synced.');
   } catch (error) {
     console.warn('WordFlow manual sync failed:', error);
@@ -370,7 +371,8 @@ async function syncNow() {
     showToast('Sync could not complete. Please try again.', true);
   } finally {
     button.disabled = false;
-    button.textContent = 'Sync now';
+    button.classList.remove('is-syncing');
+    button.removeAttribute('aria-busy');
   }
 }
 
@@ -487,6 +489,9 @@ async function loadToday() {
   $('todayTerm').textContent = currentTodayItem.term;
   $('todayPronunciation').textContent = currentTodayItem.pronunciation || 'Pronounce';
   $('todayMeaning').textContent = currentTodayItem.meaning;
+  // The import format calls this an explanation; on the Today screen it is a
+  // short practical cue for when the word fits naturally in conversation.
+  $('todayExplanation').textContent = currentTodayItem.explanation || '';
   const allItems = await getAllItems();
   $('todayProgress').style.width = `${Math.min(100, Math.max(8, (allItems.filter((item) => item.status === 'learned').length / Math.max(1, allItems.length)) * 100))}%`;
   $('knowBtn').classList.toggle('is-selected', currentTodayItem.status === 'learned' || currentTodayItem.reviewStage !== null);
@@ -497,15 +502,23 @@ async function loadToday() {
 
 function openDetails(item = currentTodayItem) {
   if (!item) return;
-  $('detailExamples').replaceChildren(...item.examples.map((example) => {
+  // Older imported packs did not include every optional detail. Keep the
+  // sheet useful (and avoid a blank panel) when opening one of those words.
+  const examples = Array.isArray(item.examples) && item.examples.length
+    ? item.examples : ['No example sentences have been added yet.'];
+  $('detailExamples').replaceChildren(...examples.map((example) => {
     const row = document.createElement('li'); row.textContent = example; return row;
   }));
+  $('detailUsage').textContent = item.explanation || 'No usage note has been added yet.';
   $('detailOrigin').textContent = item.origin || 'No origin note has been added for this word yet.';
   const synonyms = item.synonyms?.length ? item.synonyms : ['No synonyms added'];
   $('detailSynonyms').replaceChildren(...synonyms.map((synonym) => {
     const chip = document.createElement('span'); chip.textContent = synonym; return chip;
   }));
   show($('detailsSheet'));
+  // A previous tall word may have left the sheet scrolled down. Always open
+  // at its first section so examples and usage notes are immediately visible.
+  document.querySelector('.details-panel').scrollTop = 0;
   document.body.style.overflow = 'hidden';
 }
 
