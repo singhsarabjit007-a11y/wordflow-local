@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "pack": {
+    "name": "Everyday expression pack",
+    "description": "Three practical words for testing WordFlow's full word-detail experience.",
+    "topic": "Communication and growth",
+    "difficulty": "Intermediate"
+  },
+  "items": [
+    {
+      "term": "eloquent",
+      "type": "adjective",
+      "meaning": "Fluent, persuasive, and graceful in speaking or writing.",
+      "pronunciation": "/ˈeləkwənt/",
+      "explanation": "Use it to praise someone who expresses ideas clearly and beautifully, especially in a speech or piece of writing.",
+      "origin": "From Latin eloquens, meaning speaking out or fluent, from eloqui: to speak out.",
+      "synonyms": ["expressive", "articulate", "persuasive", "fluent", "well-spoken"],
+      "category": "Communication",
+      "difficulty": "Intermediate",
+      "examples": [
+        "Her eloquent speech moved the entire audience.",
+        "He wrote an eloquent letter of thanks.",
+        "The lawyer gave an eloquent closing argument.",
+        "She is eloquent when explaining difficult ideas.",
+        "His silence was more eloquent than a long reply."
+      ]
+    },
+    {
+      "term": "pragmatic",
+      "type": "adjective",
+      "meaning": "Dealing with problems in a practical and realistic way.",
+      "pronunciation": "/præɡˈmadik/",
+      "explanation": "Use it for a person, decision, or plan focused on what will work in real life rather than on ideal theories.",
+      "origin": "From Greek pragmatikos, meaning relating to action or business, from pragma: a deed or matter.",
+      "synonyms": ["practical", "realistic", "sensible", "down-to-earth", "matter-of-fact"],
+      "category": "Work and decisions",
+      "difficulty": "Intermediate",
+      "examples": [
+        "We need a pragmatic solution to the budget problem.",
+        "She took a pragmatic approach to finding a new job.",
+        "His pragmatic advice helped the team move forward.",
+        "The plan is ambitious but still pragmatic.",
+        "Being pragmatic does not mean giving up on your goals."
+      ]
+    },
+    {
+      "term": "resilient",
+      "type": "adjective",
+      "meaning": "Able to recover quickly after difficulty, stress, or change.",
+      "pronunciation": "/rəˈzilyənt/",
+      "explanation": "Use it to describe people, communities, or systems that adapt and recover after setbacks.",
+      "origin": "From Latin resilire, meaning to spring back or rebound.",
+      "synonyms": ["strong", "adaptable", "tough", "durable", "resourceful"],
+      "category": "Personal growth",
+      "difficulty": "Intermediate",
+      "examples": [
+        "Children can be remarkably resilient after a major change.",
+        "The resilient team recovered quickly from the failed launch.",
+        "She remained resilient during a difficult year.",
+        "A resilient system can keep working during an outage.",
+        "Building resilient habits takes time and patience."
+      ]
+    }
+  ]
+}
