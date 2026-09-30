@@ -1,0 +1,191 @@
+{
+  "schema_version": 1,
+  "pack": {
+    "name": "Professional communication",
+    "description": "Ten precise words for clear, thoughtful, and effective workplace communication.",
+    "topic": "Professional communication",
+    "difficulty": "Intermediate to Advanced"
+  },
+  "items": [
+    {
+      "term": "nuanced",
+      "type": "adjective",
+      "meaning": "Showing small but important differences in meaning, feeling, or opinion.",
+      "pronunciation": "/ˈn(y)o͞oänst/",
+      "explanation": "Use it when an idea, answer, or situation is more detailed and subtle than a simple yes-or-no description.",
+      "origin": "From French nuance, meaning a slight shade or variation, ultimately related to Latin nubes: cloud.",
+      "synonyms": ["subtle", "refined", "complex", "detailed", "sophisticated"],
+      "category": "Thinking and analysis",
+      "difficulty": "Advanced",
+      "examples": [
+        "The report gives a nuanced view of the market.",
+        "Her nuanced answer acknowledged both sides of the issue.",
+        "The policy needs a more nuanced explanation.",
+        "He made a nuanced distinction between urgency and importance.",
+        "The conversation became more nuanced after we heard the customer feedback."
+      ]
+    },
+    {
+      "term": "concise",
+      "type": "adjective",
+      "meaning": "Giving a lot of information clearly in only a few words.",
+      "pronunciation": "/kənˈsīs/",
+      "explanation": "Use it to praise a message, summary, or explanation that is brief without leaving out what matters.",
+      "origin": "From Latin concisus, meaning cut short or brief.",
+      "synonyms": ["brief", "succinct", "compact", "to the point", "pithy"],
+      "category": "Writing and communication",
+      "difficulty": "Intermediate",
+      "examples": [
+        "Please keep the project update concise.",
+        "Her concise email answered every question.",
+        "The presenter gave a concise overview of the plan.",
+        "A concise subject line helps people find the message later.",
+        "He was concise but still polite during the meeting."
+      ]
+    },
+    {
+      "term": "candid",
+      "type": "adjective",
+      "meaning": "Truthful and direct, especially about something that may be difficult to say.",
+      "pronunciation": "/ˈkandid/",
+      "explanation": "Use it for honest feedback or open conversation when directness is helpful and respectful.",
+      "origin": "From Latin candidus, meaning white, bright, or sincere.",
+      "synonyms": ["honest", "frank", "open", "straightforward", "forthright"],
+      "category": "Feedback and trust",
+      "difficulty": "Intermediate",
+      "examples": [
+        "She gave candid feedback on the proposal.",
+        "Let us have a candid conversation about the deadline.",
+        "His candid response helped us solve the problem faster.",
+        "The survey encouraged candid comments from employees.",
+        "Be candid, but make sure your feedback is constructive."
+      ]
+    },
+    {
+      "term": "diligent",
+      "type": "adjective",
+      "meaning": "Careful and persistent in doing work or duties.",
+      "pronunciation": "/ˈdiləjənt/",
+      "explanation": "Use it to describe someone who works steadily, pays attention to responsibilities, and follows through.",
+      "origin": "From Latin diligere, meaning to value, esteem, or take delight in.",
+      "synonyms": ["hardworking", "conscientious", "careful", "thorough", "dedicated"],
+      "category": "Work habits",
+      "difficulty": "Intermediate",
+      "examples": [
+        "She is diligent about documenting each decision.",
+        "The diligent review caught an error before launch.",
+        "He made diligent efforts to understand the new process.",
+        "A diligent follow-up can build trust with clients.",
+        "The team was diligent in testing the update."
+      ]
+    },
+    {
+      "term": "adaptable",
+      "type": "adjective",
+      "meaning": "Able to change easily to suit new conditions or situations.",
+      "pronunciation": "/əˈdaptəbəl/",
+      "explanation": "Use it for people, plans, or systems that respond well when circumstances change.",
+      "origin": "From Latin adaptare, meaning to fit or adjust to.",
+      "synonyms": ["flexible", "versatile", "adjustable", "resilient", "open-minded"],
+      "category": "Growth and change",
+      "difficulty": "Intermediate",
+      "examples": [
+        "An adaptable team can handle changing priorities.",
+        "She stayed adaptable when the client changed the brief.",
+        "The software is adaptable to different business needs.",
+        "Being adaptable is useful in a fast-moving role.",
+        "Their adaptable process allowed the project to continue remotely."
+      ]
+    },
+    {
+      "term": "insightful",
+      "type": "adjective",
+      "meaning": "Showing a deep and accurate understanding of a person, problem, or situation.",
+      "pronunciation": "/ˈinˌsītfəl/",
+      "explanation": "Use it to praise an observation, question, or analysis that reveals something important others may have missed.",
+      "origin": "Formed from insight, meaning an inner sight or clear understanding.",
+      "synonyms": ["perceptive", "thoughtful", "astute", "wise", "observant"],
+      "category": "Thinking and analysis",
+      "difficulty": "Intermediate",
+      "examples": [
+        "Her insightful question changed the direction of the discussion.",
+        "The interview contains several insightful comments about leadership.",
+        "He gave an insightful analysis of the customer data.",
+        "The mentor offered an insightful perspective on my career choice.",
+        "Your feedback was both kind and insightful."
+      ]
+    },
+    {
+      "term": "deliberate",
+      "type": "adjective",
+      "meaning": "Done consciously and intentionally, rather than by accident or without thought.",
+      "pronunciation": "/dəˈlib(ə)rət/",
+      "explanation": "Use it for a careful choice, action, or process that has been planned with a clear purpose.",
+      "origin": "From Latin deliberare, meaning to weigh or consider carefully.",
+      "synonyms": ["intentional", "purposeful", "planned", "careful", "considered"],
+      "category": "Decision-making",
+      "difficulty": "Intermediate",
+      "examples": [
+        "The change was deliberate, not an oversight.",
+        "She took a deliberate approach to building the new team.",
+        "We need to be deliberate about how we use customer data.",
+        "His deliberate pause gave everyone time to think.",
+        "The design uses deliberate spacing to make the page easier to read."
+      ]
+    },
+    {
+      "term": "credible",
+      "type": "adjective",
+      "meaning": "Able to be believed because it seems trustworthy and well supported.",
+      "pronunciation": "/ˈkredəbəl/",
+      "explanation": "Use it for evidence, sources, explanations, or people that deserve trust because they are reliable.",
+      "origin": "From Latin credibilis, meaning worthy of belief, from credere: to believe.",
+      "synonyms": ["trustworthy", "reliable", "believable", "convincing", "reputable"],
+      "category": "Research and trust",
+      "difficulty": "Intermediate",
+      "examples": [
+        "Use credible sources in the final report.",
+        "The explanation is credible because the data supports it.",
+        "She built a credible case for increasing the budget.",
+        "A credible estimate includes clear assumptions.",
+        "The company needs a credible plan for reducing emissions."
+      ]
+    },
+    {
+      "term": "coherent",
+      "type": "adjective",
+      "meaning": "Logical, clear, and easy to understand as a whole.",
+      "pronunciation": "/kōˈhirənt/",
+      "explanation": "Use it when ideas, arguments, or plans connect well and make sense from beginning to end.",
+      "origin": "From Latin cohaerere, meaning to stick together or be connected.",
+      "synonyms": ["logical", "clear", "consistent", "organized", "well-structured"],
+      "category": "Writing and communication",
+      "difficulty": "Intermediate",
+      "examples": [
+        "The proposal needs a more coherent structure.",
+        "She presented a coherent argument for the new strategy.",
+        "The team created a coherent plan across all departments.",
+        "His notes were detailed but not yet coherent.",
+        "A coherent story helps customers understand the value of the product."
+      ]
+    },
+    {
+      "term": "resourceful",
+      "type": "adjective",
+      "meaning": "Good at finding clever and effective ways to solve problems.",
+      "pronunciation": "/rəˈsôrsfəl/",
+      "explanation": "Use it to describe someone who makes good use of the time, tools, and information available to them.",
+      "origin": "From resource, based on Old French resourse: a source of help or aid.",
+      "synonyms": ["inventive", "capable", "creative", "ingenious", "enterprising"],
+      "category": "Problem-solving",
+      "difficulty": "Intermediate",
+      "examples": [
+        "The resourceful team found a workaround before the deadline.",
+        "She was resourceful when the usual supplier was unavailable.",
+        "A resourceful manager can solve problems without wasting money.",
+        "He gave a resourceful answer using the tools already available.",
+        "Their resourceful approach turned a limitation into an advantage."
+      ]
+    }
+  ]
+}
