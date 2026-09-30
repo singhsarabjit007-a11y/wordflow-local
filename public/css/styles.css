@@ -1,14 +1,15 @@
 :root { --bg:#f7f4ec; --surface:#fffdfa; --text:#141414; --muted:#6c6c6c; --line:#dedbd3; --soft:#efede7; --shadow:0 12px 34px rgba(30,26,18,.055); --safe-bottom:env(safe-area-inset-bottom,0px); }
 * { box-sizing:border-box; }
-html, body { min-height:100%; background:var(--bg); }
+html, body { width:100%; height:100%; min-height:100%; background:var(--bg); }
 html { -webkit-text-size-adjust:100%; text-size-adjust:100%; }
-body { margin:0; overflow-x:hidden; color:var(--text); font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height:1.45; }
+body { margin:0; overflow:hidden; color:var(--text); font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height:1.45; overscroll-behavior:none; }
 button, input, textarea { font:inherit; }
 button { cursor:pointer; }
 .hidden { display:none !important; }
 .wide { width:100%; }
-.app-shell { min-height:100dvh; }
-.content { width:min(760px,100%); min-height:100dvh; margin:0 auto; padding:42px 22px calc(104px + var(--safe-bottom)); }
+.app-shell { width:100%; height:100dvh; max-height:100dvh; overflow:hidden; }
+.content { width:min(760px,100%); height:100dvh; min-height:0; margin:0 auto; overflow:hidden; padding:24px 22px calc(88px + var(--safe-bottom)); }
+.content > [data-section] { height:100%; min-height:0; overflow:hidden; }
 .eyebrow { color:#5d5d60; font-size:.77rem; font-weight:750; letter-spacing:.18em; }
 h1,h2 { font-family:Georgia, "Times New Roman", serif; letter-spacing:-.045em; }
 h1 { margin:7px 0 0; font-size:clamp(2.55rem, 11vw, 4.7rem); line-height:.98; }
@@ -20,7 +21,7 @@ p { margin:0; color:var(--muted); }
 button:disabled { opacity:.55; cursor:wait; }
 
 /* Today */
-.today-screen { display:flex; min-height:calc(100dvh - 146px); flex-direction:column; }
+.today-screen { display:flex; height:100%; min-height:0; flex-direction:column; }
 .today-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
 .today-head > :first-child { min-width:0; flex:1; }
 .progress-track { width:min(100%,320px); height:10px; margin-top:17px; overflow:hidden; border-radius:999px; background:#e6e3dd; }
@@ -30,14 +31,14 @@ button:disabled { opacity:.55; cursor:wait; }
 .sync-btn.is-syncing { animation:sync-spin .8s linear infinite; }
 .sync-status,.small-status { max-width:118px; color:var(--muted); font-size:.72rem; line-height:1.25; }
 .sync-status { max-width:140px; font-size:.68rem; white-space:nowrap; }
-.word-stage { display:grid; flex:1; align-content:center; justify-items:center; padding:55px 0 74px; text-align:center; }
+.word-stage { display:grid; min-height:0; flex:1; align-content:center; justify-items:center; padding:25px 0 18px; text-align:center; }
 .term { max-width:100%; overflow-wrap:anywhere; font-size:clamp(3.2rem,15vw,6rem); }
 .word-type { margin:9px 0 27px; color:#828282; font-family:Georgia,serif; font-size:1.45rem; font-style:italic; }
 .pronunciation { display:flex; align-items:center; gap:11px; border:0; border-radius:999px; padding:11px 18px; background:rgba(255,255,255,.72); color:var(--text); font-size:1.15rem; }
 .meaning { max-width:620px; margin-top:27px; color:var(--text); font-size:clamp(1.35rem,5.1vw,2rem); }
 .use-note { max-width:590px; margin:13px auto 0; font-size:.9rem; }
 .use-note:not(:empty)::before { color:var(--text); content:"When to use it · "; font-weight:750; }
-.today-actions { display:grid; width:100%; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin-top:88px; }
+.today-actions { display:grid; width:100%; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin-top:clamp(28px,8dvh,72px); }
 .word-action { display:grid; min-width:0; justify-items:center; gap:10px; border:0; background:transparent; color:var(--text); }
 .word-action > span { display:grid; width:52px; height:52px; place-items:center; border-radius:50%; background:var(--soft); font-size:2rem; line-height:1; }
 .word-action small { font-size:.76rem; font-weight:650; }
@@ -47,11 +48,11 @@ button:disabled { opacity:.55; cursor:wait; }
 .empty-state p { margin-bottom:20px; }
 
 /* Shared page layouts */
-.page-heading { margin:38px 0 30px; text-align:center; }
+.page-heading { margin:12px 0 18px; text-align:center; }
 .page-heading > p { margin-top:9px; }
 .page-count { font-size:1rem; }
 .compact-heading { margin-top:16px; }
-.queue-list,.library-list { display:grid; gap:14px; }
+.queue-list,.library-list { display:grid; min-height:0; gap:14px; }
 .queue-row,.library-row { display:flex; align-items:center; gap:15px; min-height:92px; padding:16px; border:1px solid #ece9e2; border-radius:24px; background:rgba(255,255,255,.65); box-shadow:var(--shadow); }
 .queue-number,.library-mark { display:grid; width:48px; height:48px; flex:0 0 48px; place-items:center; border:1px solid var(--text); border-radius:50%; font-family:Georgia,serif; font-size:1.28rem; }
 .library-mark { border:0; background:var(--soft); font-family:inherit; font-size:1.25rem; }
@@ -63,6 +64,12 @@ button:disabled { opacity:.55; cursor:wait; }
 .queue-handle { font-size:1.35rem; letter-spacing:-.15em; }
 .quiet-center { margin:31px 0; text-align:center; font-size:.83rem; }
 
+/* A panel is always the height of the phone. The list itself, rather than
+   the browser page, handles overflow so the bottom navigation never moves. */
+#queueSection { display:grid; grid-template-rows:auto minmax(0,1fr) auto; }
+#queueSection .queue-list { overflow-y:auto; overscroll-behavior:contain; padding:2px 2px 10px; scrollbar-width:none; }
+#queueSection .queue-list::-webkit-scrollbar,#libraryList::-webkit-scrollbar { display:none; }
+
 /* Library */
 .search-box { display:flex; align-items:center; gap:12px; padding:13px 17px; border:1px solid #ece9e2; border-radius:22px; background:rgba(255,255,255,.65); box-shadow:var(--shadow); }
 .search-box > span { font-size:1.9rem; line-height:.5; }
@@ -70,6 +77,10 @@ button:disabled { opacity:.55; cursor:wait; }
 .filter-row { display:flex; gap:8px; overflow:auto; padding:17px 0 20px; scrollbar-width:none; }
 .filter-chip { flex:0 0 auto; border:1px solid var(--line); border-radius:999px; padding:9px 15px; background:transparent; color:#555; font-size:.82rem; font-weight:700; }
 .filter-chip.active { border-color:var(--soft); background:var(--soft); color:var(--text); }
+#librarySection { display:grid; grid-template-rows:auto auto auto minmax(0,1fr); }
+#librarySection .page-heading { margin-bottom:14px; }
+#librarySection .filter-row { min-width:0; margin:0; padding:13px 0 14px; overscroll-behavior-x:contain; }
+#libraryList { min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:2px 2px 12px; scrollbar-width:none; }
 
 /* Import */
 .import-card,.settings-card,.auth-panel { margin-bottom:16px; padding:23px; border:1px solid #ebe8e1; border-radius:25px; background:rgba(255,255,255,.66); box-shadow:var(--shadow); }
@@ -153,6 +164,7 @@ textarea { width:100%; min-height:126px; margin:0 0 12px; border:0; border-radiu
 #importSection .import-title p,#settingsSection .settings-title p { margin-top:1px; font-size:.78rem; }
 #importSection .import-card p { margin-bottom:9px; }
 #importSection textarea { min-height:64px; height:64px; margin-bottom:8px; padding:9px 11px; font-size:.72rem; }
+#importSection textarea { resize:none; }
 #importSection .prompt-link { font-size:.88rem; }
 #settingsSection .time-grid { gap:8px; margin-bottom:10px; }
 #settingsSection .time-grid input { border-radius:13px; padding:9px 10px; font-size:1rem; }
@@ -163,6 +175,11 @@ textarea { width:100%; min-height:126px; margin:0 0 12px; border:0; border-radiu
 #settingsSection .small-status { font-size:.68rem; }
 
 @media (max-height:720px) {
+  .content { padding-top:16px; padding-bottom:calc(82px + var(--safe-bottom)); }
+  .word-stage { padding-top:15px; padding-bottom:10px; }
+  .word-type { margin:6px 0 15px; font-size:1.25rem; }
+  .meaning { margin-top:17px; }
+  .today-actions { margin-top:22px; }
   #importSection .page-heading,#settingsSection .page-heading { margin-top:0; margin-bottom:10px; }
   #importSection .import-card,#settingsSection .settings-card { padding-top:12px; padding-bottom:12px; }
   #settingsSection .settings-title { margin-bottom:7px; }
