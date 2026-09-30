@@ -428,7 +428,9 @@ function wireEvents() {
   $('reviewBtn').addEventListener('click', () => updateTodayStatus('review'));
   $('nextWordBtn').addEventListener('click', advanceToNextWord);
   $('speakBtn').addEventListener('click', pronounceTodayWord);
-  $('detailsBtn').addEventListener('click', openDetails);
+  // Do not pass the click event as the word. Queue rows explicitly pass an
+  // item, while the Today button should always open currentTodayItem.
+  $('detailsBtn').addEventListener('click', () => openDetails());
   $('detailsClose').addEventListener('click', closeDetails);
   $('detailsCloseButton').addEventListener('click', closeDetails);
   $('favoriteBtn').addEventListener('click', () => currentTodayItem && toggleFavorite(currentTodayItem));
@@ -500,18 +502,21 @@ async function loadToday() {
   await updateNotificationStatus();
 }
 
-function openDetails(item = currentTodayItem) {
-  if (!item) return;
+function openDetails(item) {
+  // A defensive fallback also protects this view if a browser event is ever
+  // passed here accidentally: only an actual vocabulary item is valid data.
+  const selectedItem = item?.term ? item : currentTodayItem;
+  if (!selectedItem) return;
   // Older imported packs did not include every optional detail. Keep the
   // sheet useful (and avoid a blank panel) when opening one of those words.
-  const examples = Array.isArray(item.examples) && item.examples.length
-    ? item.examples : ['No example sentences have been added yet.'];
+  const examples = Array.isArray(selectedItem.examples) && selectedItem.examples.length
+    ? selectedItem.examples : ['No example sentences have been added yet.'];
   $('detailExamples').replaceChildren(...examples.map((example) => {
     const row = document.createElement('li'); row.textContent = example; return row;
   }));
-  $('detailUsage').textContent = item.explanation || 'No usage note has been added yet.';
-  $('detailOrigin').textContent = item.origin || 'No origin note has been added for this word yet.';
-  const synonyms = item.synonyms?.length ? item.synonyms : ['No synonyms added'];
+  $('detailUsage').textContent = selectedItem.explanation || 'No usage note has been added yet.';
+  $('detailOrigin').textContent = selectedItem.origin || 'No origin note has been added for this word yet.';
+  const synonyms = selectedItem.synonyms?.length ? selectedItem.synonyms : ['No synonyms added'];
   $('detailSynonyms').replaceChildren(...synonyms.map((synonym) => {
     const chip = document.createElement('span'); chip.textContent = synonym; return chip;
   }));
