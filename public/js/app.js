@@ -44,6 +44,8 @@ let supabaseSession = null;
 let cloudReadyForUserId = null;
 let cloudActivationForUserId = null;
 let cloudSyncTimer = null;
+let cloudRealtimeChannel = null;
+let cloudRealtimeUserId = null;
 let applyingCloudState = false;
 
 const $ = (id) => document.getElementById(id);
@@ -197,6 +199,7 @@ async function initializeCloudSync() {
       supabaseSession = session;
       if (!session) {
         cloudReadyForUserId = null;
+        void stopCloudRealtime();
         showAuthGate('Enter your email to continue syncing your WordFlow library.');
         return;
       }
@@ -224,12 +227,14 @@ async function activateCloudSession() {
 
   try {
     setCloudStatus('Syncing your private library…');
-    await reconcileCloudState();
+    const synced = await reconcileCloudState();
+    if (!synced) throw new Error('Cloud state could not be saved.');
     // Ignore a slow response if the user changed accounts during that request.
     if (supabaseSession?.user?.id !== userId) return false;
     cloudReadyForUserId = userId;
     if (settings.pushEnabled) void syncPushSubscription();
     setCloudStatus('Cloud sync is active for your account.');
+    void startCloudRealtime();
   } catch (error) {
     // A valid login must not lock a person out of their offline data if the
     // network or Supabase is temporarily unavailable.
@@ -280,11 +285,12 @@ function queueCloudSync(delay = 700) {
 }
 
 async function uploadCloudState() {
-  if (!supabaseClient || !supabaseSession || applyingCloudState) return;
+  if (!supabaseClient || !supabaseSession || applyingCloudState) return false;
   const payload = { items: await getAllItems(), settings };
   const { error } = await supabaseClient.from('wordflow_device_state').upsert({ user_id: supabaseSession.user.id, payload, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
-  if (error) { console.warn('WordFlow cloud upload failed:', error); setCloudStatus('Cloud sync could not save. Working locally.', true); return; }
+  if (error) { console.warn('WordFlow cloud upload failed:', error); setCloudStatus('Cloud sync could not save. Working locally.', true); return false; }
   setCloudStatus(`Cloud sync active · saved ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+  return true;
 }
 
 async function reconcileCloudState() {
@@ -295,8 +301,75 @@ async function reconcileCloudState() {
   const localItems = await getAllItems();
   // A fresh phone creates a local settings timestamp before it receives its
   // session. If it has no vocabulary yet, prefer the existing cloud library.
-  if (Array.isArray(data?.payload?.items) && (localItems.length === 0 || remoteChangedAt > localChangedAt)) await applyCloudState(data.payload);
-  else await uploadCloudState();
+  if (Array.isArray(data?.payload?.items) && (localItems.length === 0 || remoteChangedAt > localChangedAt)) {
+    await applyCloudState(data.payload);
+    return true;
+  }
+  return uploadCloudState();
+}
+
+// Realtime updates only exist while WordFlow is open. They supplement the
+// normal start-up/manual sync path and avoid wasteful two-second polling.
+async function startCloudRealtime() {
+  const userId = supabaseSession?.user?.id;
+  if (!supabaseClient || !userId || cloudRealtimeUserId === userId) return;
+  await stopCloudRealtime();
+  if (supabaseSession?.user?.id !== userId) return;
+
+  cloudRealtimeUserId = userId;
+  cloudRealtimeChannel = supabaseClient
+    .channel(`wordflow-library-${userId}`)
+    .on('postgres_changes', {
+      event: '*', schema: 'public', table: 'wordflow_device_state', filter: `user_id=eq.${userId}`
+    }, (change) => { void applyRealtimeCloudChange(change.new); })
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') setCloudStatus('Live sync active · listening for changes.');
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setCloudStatus('Live sync disconnected. Use Sync now while it reconnects.', true);
+    });
+}
+
+async function stopCloudRealtime() {
+  const channel = cloudRealtimeChannel;
+  cloudRealtimeChannel = null;
+  cloudRealtimeUserId = null;
+  if (channel && supabaseClient) await supabaseClient.removeChannel(channel);
+}
+
+async function applyRealtimeCloudChange(remoteRecord) {
+  if (applyingCloudState || !remoteRecord?.payload || remoteRecord.user_id !== supabaseSession?.user?.id) return;
+  const remoteChangedAt = Date.parse(remoteRecord.payload.settings?.lastChangedAt || remoteRecord.updated_at || 0);
+  const localChangedAt = Date.parse(settings.lastChangedAt || 0);
+  // Ignore our own echoed write. A newer write from another open device wins.
+  if (!Array.isArray(remoteRecord.payload.items) || remoteChangedAt <= localChangedAt) return;
+  try {
+    await applyCloudState(remoteRecord.payload);
+    setCloudStatus(`Live sync active · updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+  } catch (error) {
+    console.warn('WordFlow live update could not be applied:', error);
+    setCloudStatus('A live update could not be applied. Use Sync now to retry.', true);
+  }
+}
+
+async function syncNow() {
+  if (!supabaseClient || !supabaseSession) return showToast('Sign in before syncing your library.', true);
+  const button = $('syncNowBtn');
+  button.disabled = true;
+  button.textContent = 'Syncing…';
+  setCloudStatus('Syncing now…');
+  try {
+    const synced = await reconcileCloudState();
+    if (!synced) return;
+    if (settings.pushEnabled) await syncPushSubscription();
+    setCloudStatus(`Live sync active · checked ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+    showToast('Library is synced.');
+  } catch (error) {
+    console.warn('WordFlow manual sync failed:', error);
+    setCloudStatus('Sync now could not complete. Your local copy is safe.', true);
+    showToast('Sync could not complete. Please try again.', true);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Sync now';
+  }
 }
 
 async function applyCloudState(payload) {
@@ -346,6 +419,7 @@ function createReminderTimeFields() {
 
 function wireEvents() {
   $('magicLinkForm').addEventListener('submit', sendMagicLink);
+  $('syncNowBtn').addEventListener('click', syncNow);
   document.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.nav)));
   $('refreshTodayBtn').addEventListener('click', () => loadToday());
   $('knowBtn').addEventListener('click', () => updateTodayStatus('learned'));

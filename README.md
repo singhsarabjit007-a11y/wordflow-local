@@ -15,7 +15,8 @@ or remember, and the same email can open the same library on another device.
 - Spaced reviews at 1, 3, 7, 21 and 60 days
 - Five configurable push reminders, including while the installed PWA is closed
 - Offline cache plus export/restore backups
-- Secure Supabase cloud sync for the signed-in email account
+- Secure Supabase cloud sync for the signed-in email account, with live updates
+  between open devices and a manual **Sync now** control
 
 ## Passwordless email identity
 
@@ -41,7 +42,8 @@ downloads the existing cloud library before it can upload its empty one.
    ```
 
    If you use a different Netlify production URL, substitute that exact URL.
-4. In **SQL Editor**, run [`supabase/schema.sql`](supabase/schema.sql).
+4. In **SQL Editor**, run [`supabase/schema.sql`](supabase/schema.sql). This
+   also enables Supabase Realtime for WordFlow's cloud-state table.
 5. In **Project Settings → API**, copy the project URL and **Publishable key**.
 
 Never put a Supabase service-role key in the browser or GitHub. Cloud sync does

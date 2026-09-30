@@ -31,6 +31,22 @@ on public.wordflow_device_state for update to authenticated
 using ((select auth.uid()) = user_id)
 with check ((select auth.uid()) = user_id);
 
+-- Let open WordFlow clients hear row changes immediately. The block is safe to
+-- run again, so it also works for projects where this table was enabled before.
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'wordflow_device_state'
+  ) then
+    alter publication supabase_realtime add table public.wordflow_device_state;
+  end if;
+end;
+$$;
+
 -- Closed-app push is scoped to the signed-in account. Browser subscription
 -- credentials are private, so RLS prevents another account from reading or
 -- replacing a device's subscription.
