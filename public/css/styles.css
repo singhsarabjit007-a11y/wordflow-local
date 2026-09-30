@@ -58,8 +58,8 @@ button:disabled { opacity:.55; cursor:wait; }
 .library-mark { border:0; background:var(--soft); font-family:inherit; font-size:1.25rem; }
 .library-mark.learned { background:var(--text); color:white; }
 .row-copy { min-width:0; flex:1; border:0; padding:0; background:transparent; color:var(--text); text-align:left; }
-.row-copy strong { display:block; overflow:hidden; font-family:Georgia,serif; font-size:1.65rem; line-height:1.05; text-overflow:ellipsis; white-space:nowrap; }
-.row-copy span { display:block; overflow:hidden; margin-top:7px; color:#454545; font-family:Georgia,serif; font-size:1rem; text-overflow:ellipsis; white-space:nowrap; }
+.row-copy strong { display:block; overflow-wrap:anywhere; font-family:Georgia,serif; font-size:1.65rem; line-height:1.05; }
+.row-copy span { display:block; overflow-wrap:anywhere; margin-top:7px; color:#454545; font-family:Georgia,serif; font-size:1rem; line-height:1.25; }
 .row-side { border:0; padding:0; background:transparent; color:#666; font-size:1.45rem; }
 .queue-handle { font-size:1.35rem; letter-spacing:-.15em; }
 .quiet-center { margin:31px 0; text-align:center; font-size:.83rem; }
