@@ -1,7 +1,7 @@
 // Static cache only: WordFlow does not make API calls or store cloud data.
 // Increment this when the static app shell changes, so installed PWAs fetch
 // the new JavaScript and interface instead of continuing to use an old shell.
-const CACHE_NAME = 'wordflow-push-v1';
+const CACHE_NAME = 'wordflow-push-v2';
 const STATIC_ASSETS = ['/', '/index.html', '/css/styles.css', '/js/app.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "pack": {
+    "name": "Word details test pack",
+    "description": "A three-word pack for testing pronunciation, word origins, synonyms, saved words, and the review queue.",
+    "topic": "Useful English",
+    "difficulty": "Intermediate"
+  },
+  "items": [
+    {
+      "term": "serendipity",
+      "type": "noun",
+      "meaning": "A pleasant or valuable discovery made by chance.",
+      "pronunciation": "/ˌserənˈdipədē/",
+      "explanation": "Use it for an unexpectedly fortunate discovery or encounter.",
+      "origin": "Coined in 1754 by Horace Walpole from the Persian tale The Three Princes of Serendip, whose characters made discoveries by accident.",
+      "synonyms": ["chance", "fortune", "discovery", "luck", "happy accident"],
+      "category": "Everyday language",
+      "difficulty": "Intermediate",
+      "examples": [
+        "It was pure serendipity that we met at the airport.",
+        "Her career took off thanks to a bit of serendipity.",
+        "Finding that old letter was a serendipity.",
+        "The discovery was a serendipity, not the result of a planned search.",
+        "Travel often brings serendipity in the form of unexpected friendships."
+      ]
+    },
+    {
+      "term": "lucid",
+      "type": "adjective",
+      "meaning": "Clear and easy to understand.",
+      "pronunciation": "/ˈlo͞osid/",
+      "explanation": "Use it to describe writing, speech, or thinking that is especially clear.",
+      "origin": "From Latin lucidus, meaning bright or clear, from lux, meaning light.",
+      "synonyms": ["clear", "coherent", "comprehensible", "intelligible", "plain"],
+      "category": "Communication",
+      "difficulty": "Intermediate",
+      "examples": [
+        "She gave a lucid explanation of the plan.",
+        "The report is brief and lucid.",
+        "His instructions were lucid enough for everyone to follow.",
+        "A lucid summary can prevent misunderstandings.",
+        "The teacher used a lucid example to explain the concept."
+      ]
+    },
+    {
+      "term": "meticulous",
+      "type": "adjective",
+      "meaning": "Very careful and precise about details.",
+      "pronunciation": "/məˈtikyələs/",
+      "explanation": "Use it to praise careful work that pays close attention to small details.",
+      "origin": "From Latin meticulosus, meaning fearful or overly cautious, later developing the sense of being very careful.",
+      "synonyms": ["careful", "thorough", "precise", "detailed", "scrupulous"],
+      "category": "Work and growth",
+      "difficulty": "Advanced",
+      "examples": [
+        "She kept meticulous notes during the meeting.",
+        "The editor made a meticulous review of the draft.",
+        "He is meticulous about checking the final numbers.",
+        "A meticulous process reduces avoidable errors.",
+        "Their meticulous planning made the launch smoother."
+      ]
+    }
+  ]
+}

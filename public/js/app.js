@@ -25,7 +25,9 @@ Return ONLY JSON with this exact shape:
   "pack": { "name": "Pack name", "description": "Short description", "topic": "Topic", "difficulty": "Intermediate" },
   "items": [{
     "term": "align on", "type": "phrase", "meaning": "A concise meaning.",
-    "explanation": "A fuller explanation of how it is used.", "category": "IT meetings", "difficulty": "Intermediate",
+    "pronunciation": "/əˈlaɪn ɒn/", "explanation": "A fuller explanation of how it is used.",
+    "origin": "A short, accurate word-origin note.", "synonyms": ["alternative 1", "alternative 2"],
+    "category": "IT meetings", "difficulty": "Intermediate",
     "examples": ["Example 1.", "Example 2.", "Example 3.", "Example 4.", "Example 5."]
   }]
 }
@@ -103,10 +105,10 @@ function recordLocalChange() {
 }
 
 async function upgradeStoredItems() {
-  // Existing V1 users keep their data when new optional fields are introduced.
+  // Existing imports keep working when new optional presentation fields appear.
   for (const item of await getAllItems()) {
-    if (item.isFavorite === undefined || item.reviewStage === undefined || item.reviewDueDate === undefined) {
-      await saveItem({ isFavorite: false, reviewStage: null, reviewDueDate: null, ...item });
+    if (item.isFavorite === undefined || item.reviewStage === undefined || item.reviewDueDate === undefined || item.origin === undefined || item.synonyms === undefined || item.pronunciation === undefined) {
+      await saveItem({ isFavorite: false, reviewStage: null, reviewDueDate: null, origin: '', synonyms: [], pronunciation: '', ...item });
     }
   }
 }
@@ -410,9 +412,8 @@ function createReminderTimeFields() {
   container.replaceChildren();
   settings.reminderTimes.forEach((time, index) => {
     const label = document.createElement('label');
-    label.textContent = `Reminder ${index + 1}`;
     const input = document.createElement('input');
-    input.type = 'time'; input.value = time; input.required = true; input.dataset.reminderTime = String(index);
+    input.type = 'time'; input.value = time; input.required = true; input.dataset.reminderTime = String(index); input.setAttribute('aria-label', `Reminder ${index + 1}`);
     label.appendChild(input); container.appendChild(label);
   });
 }
@@ -421,14 +422,15 @@ function wireEvents() {
   $('magicLinkForm').addEventListener('submit', sendMagicLink);
   $('syncNowBtn').addEventListener('click', syncNow);
   document.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.nav)));
-  $('refreshTodayBtn').addEventListener('click', () => loadToday());
   $('knowBtn').addEventListener('click', () => updateTodayStatus('learned'));
   $('reviewBtn').addEventListener('click', () => updateTodayStatus('review'));
   $('nextWordBtn').addEventListener('click', advanceToNextWord);
   $('speakBtn').addEventListener('click', pronounceTodayWord);
+  $('detailsBtn').addEventListener('click', openDetails);
+  $('detailsClose').addEventListener('click', closeDetails);
+  $('detailsCloseButton').addEventListener('click', closeDetails);
   $('favoriteBtn').addEventListener('click', () => currentTodayItem && toggleFavorite(currentTodayItem));
   $('notificationBtn').addEventListener('click', enableNotifications);
-  $('addWordForm').addEventListener('submit', addManualWord);
   $('jsonFileInput').addEventListener('change', readFileImport);
   $('previewPasteBtn').addEventListener('click', previewPastedImport);
   $('importBtn').addEventListener('click', importPack);
@@ -444,14 +446,13 @@ function wireEvents() {
 }
 
 function navigate(section) {
-  const allowed = ['today', 'queue', 'review', 'library', 'add', 'import', 'settings'];
+  const allowed = ['today', 'queue', 'library', 'import', 'settings'];
   const target = allowed.includes(section) ? section : 'today';
   document.querySelectorAll('[data-section]').forEach((element) => element.classList.toggle('hidden', element.dataset.section !== target));
   document.querySelectorAll('.nav-item').forEach((button) => button.classList.toggle('active', button.dataset.nav === target));
   history.replaceState(null, '', `#${target}`);
   if (target === 'today') loadToday();
   if (target === 'queue') renderQueue();
-  if (target === 'review') renderReviews();
   if (target === 'library') renderLibrary();
   if (target === 'settings') createReminderTimeFields();
 }
@@ -479,23 +480,38 @@ async function ensureTodayItem() {
 }
 
 async function loadToday() {
-  $('todayDate').textContent = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
   currentTodayItem = await ensureTodayItem();
   if (!currentTodayItem) { hide($('todayCard')); show($('todayEmpty')); await updateNotificationStatus(); return; }
   hide($('todayEmpty')); show($('todayCard'));
   $('todayType').textContent = currentTodayItem.type;
-  $('todayDifficulty').textContent = currentTodayItem.difficulty || 'Personal queue';
   $('todayTerm').textContent = currentTodayItem.term;
+  $('todayPronunciation').textContent = currentTodayItem.pronunciation || 'Pronounce';
   $('todayMeaning').textContent = currentTodayItem.meaning;
-  $('todayExplanation').textContent = currentTodayItem.explanation || '';
-  $('todayCategory').textContent = currentTodayItem.category || '';
-  $('todayExamples').replaceChildren(...currentTodayItem.examples.map((example) => { const item = document.createElement('li'); item.textContent = example; return item; }));
-  $('knowBtn').textContent = currentTodayItem.reviewStage !== null ? '✓ Review plan set' : '✓ I know this';
-  $('reviewBtn').textContent = currentTodayItem.status === 'review' ? 'In review' : 'Review later';
-  $('favoriteBtn').textContent = currentTodayItem.isFavorite ? '★ Saved' : '☆ Save';
-  // Do not force people to wait until tomorrow once they have finished today’s word.
-  currentTodayItem.status === 'review' || currentTodayItem.status === 'learned' ? show($('nextWordBtn')) : hide($('nextWordBtn'));
+  const allItems = await getAllItems();
+  $('todayProgress').style.width = `${Math.min(100, Math.max(8, (allItems.filter((item) => item.status === 'learned').length / Math.max(1, allItems.length)) * 100))}%`;
+  $('knowBtn').classList.toggle('is-selected', currentTodayItem.status === 'learned' || currentTodayItem.reviewStage !== null);
+  $('reviewBtn').classList.toggle('is-selected', currentTodayItem.status === 'review' && currentTodayItem.reviewStage === null);
+  $('favoriteBtn').classList.toggle('is-selected', currentTodayItem.isFavorite);
   await updateNotificationStatus();
+}
+
+function openDetails(item = currentTodayItem) {
+  if (!item) return;
+  $('detailExamples').replaceChildren(...item.examples.map((example) => {
+    const row = document.createElement('li'); row.textContent = example; return row;
+  }));
+  $('detailOrigin').textContent = item.origin || 'No origin note has been added for this word yet.';
+  const synonyms = item.synonyms?.length ? item.synonyms : ['No synonyms added'];
+  $('detailSynonyms').replaceChildren(...synonyms.map((synonym) => {
+    const chip = document.createElement('span'); chip.textContent = synonym; return chip;
+  }));
+  show($('detailsSheet'));
+  document.body.style.overflow = 'hidden';
+}
+
+function closeDetails() {
+  hide($('detailsSheet'));
+  document.body.style.overflow = '';
 }
 
 async function updateTodayStatus(status) {
@@ -511,12 +527,15 @@ async function updateTodayStatus(status) {
 }
 
 async function advanceToNextWord() {
-  if (!currentTodayItem || !['review', 'learned'].includes(currentTodayItem.status)) return;
-  // Clearing only the current assignment preserves every completed/review item
-  // and makes ensureTodayItem select the next queued word on this same date.
+  if (!currentTodayItem) return;
+  // Skipping an untouched daily word places it in today's review queue instead
+  // of silently losing it, then makes the next queued word available now.
+  if (currentTodayItem.status === 'active') {
+    await saveItem({ ...currentTodayItem, status: 'review', reviewDueDate: todayKey(), reviewStage: null });
+  }
   settings.todayItemId = null;
   await persistSettings();
-  await Promise.all([loadToday(), renderQueue(), renderLibrary()]);
+  await Promise.all([loadToday(), renderQueue(), renderLibrary(), renderReviews()]);
   showToast(currentTodayItem ? 'Next word is ready.' : 'Your learning queue is empty.');
 }
 
@@ -525,7 +544,7 @@ function scheduleFirstReview(item) {
 }
 
 function buildItem(raw, queuePosition) {
-  return { id: uid(), term: raw.term.trim(), normalizedTerm: normalizeTerm(raw.term), type: raw.type.trim(), meaning: raw.meaning.trim(), explanation: (raw.explanation || '').trim(), category: (raw.category || '').trim(), difficulty: (raw.difficulty || '').trim(), examples: raw.examples.map((example) => example.trim()), status: 'queued', queuePosition, createdAt: new Date().toISOString(), startedOn: null, learnedAt: null, isFavorite: false, reviewStage: null, reviewDueDate: null };
+  return { id: uid(), term: raw.term.trim(), normalizedTerm: normalizeTerm(raw.term), type: raw.type.trim(), meaning: raw.meaning.trim(), pronunciation: (raw.pronunciation || '').trim(), explanation: (raw.explanation || '').trim(), origin: (raw.origin || '').trim(), synonyms: (raw.synonyms || []).map((synonym) => synonym.trim()), category: (raw.category || '').trim(), difficulty: (raw.difficulty || '').trim(), examples: raw.examples.map((example) => example.trim()), status: 'queued', queuePosition, createdAt: new Date().toISOString(), startedOn: null, learnedAt: null, isFavorite: false, reviewStage: null, reviewDueDate: null };
 }
 
 async function addManualWord(event) {
@@ -541,6 +560,9 @@ async function addManualWord(event) {
 function validateItem(item, name = 'Item') {
   if (!item?.term?.trim() || !item.type?.trim() || !item.meaning?.trim()) throw new Error(`${name} needs a term, type and meaning.`);
   if (!Array.isArray(item.examples) || item.examples.length !== 5 || item.examples.some((example) => typeof example !== 'string' || !example.trim())) throw new Error(`${name} needs exactly five non-empty example sentences.`);
+  if (item.origin !== undefined && (typeof item.origin !== 'string' || !item.origin.trim())) throw new Error(`${name} has an invalid origin.`);
+  if (item.synonyms !== undefined && (!Array.isArray(item.synonyms) || !item.synonyms.length || item.synonyms.some((synonym) => typeof synonym !== 'string' || !synonym.trim()))) throw new Error(`${name} has invalid synonyms.`);
+  if (item.pronunciation !== undefined && typeof item.pronunciation !== 'string') throw new Error(`${name} has an invalid pronunciation.`);
 }
 
 function validatePack(payload) {
@@ -573,36 +595,37 @@ async function importPack() {
   await Promise.all([loadToday(), renderQueue(), renderLibrary()]);
 }
 
-function makeListRow(item, actions = []) {
-  const row = document.createElement('article'); row.className = 'list-item';
-  const main = document.createElement('div'); main.className = 'list-main';
-  const term = document.createElement('div'); term.className = 'list-term'; term.textContent = item.term;
-  const meta = document.createElement('div'); meta.className = 'list-meta'; meta.textContent = `${item.type} · ${item.status}`;
-  const meaning = document.createElement('div'); meaning.className = 'list-meaning'; meaning.textContent = item.meaning;
-  main.append(term, meta, meaning); row.appendChild(main);
-  if (actions.length) {
-    const actionGroup = document.createElement('div'); actionGroup.className = 'list-actions';
-    actions.forEach(({ label, action }) => { const button = document.createElement('button'); button.className = 'mini-btn'; button.textContent = label; button.addEventListener('click', action); actionGroup.appendChild(button); });
-    row.appendChild(actionGroup);
-  }
+function makeWordRow(item, { marker, side, kind = 'library', onSideClick } = {}) {
+  const row = document.createElement('article'); row.className = `${kind}-row`;
+  const badge = document.createElement('div'); badge.className = kind === 'queue' ? 'queue-number' : `library-mark${item.status === 'learned' ? ' learned' : ''}`; badge.textContent = marker;
+  const copy = document.createElement('button'); copy.className = 'row-copy'; copy.type = 'button'; copy.setAttribute('aria-label', `View details for ${item.term}`); copy.addEventListener('click', () => openDetails(item));
+  const term = document.createElement('strong'); term.textContent = item.term;
+  const meaning = document.createElement('span'); meaning.textContent = item.meaning;
+  copy.append(term, meaning);
+  const tail = document.createElement(onSideClick ? 'button' : 'span'); tail.className = `row-side${kind === 'queue' ? ' queue-handle' : ''}`; tail.textContent = side;
+  if (onSideClick) { tail.type = 'button'; tail.setAttribute('aria-label', `Review ${item.term}`); tail.addEventListener('click', onSideClick); }
+  row.append(badge, copy, tail);
   return row;
 }
 
 async function renderQueue() {
   const items = (await getAllItems()).filter((item) => item.status === 'queued').sort((a, b) => a.queuePosition - b.queuePosition);
-  $('queueList').replaceChildren(...items.map((item) => makeListRow(item, [{ label: 'Remove', action: async () => { await removeItem(item.id); showToast('Removed from the queue.'); renderQueue(); renderLibrary(); } }])));
+  $('queueCount').textContent = `${items.length} word${items.length === 1 ? '' : 's'}`;
+  $('queueList').replaceChildren(...items.map((item, index) => makeWordRow(item, { kind: 'queue', marker: String(index + 1), side: '☰' })));
   items.length ? hide($('queueEmpty')) : show($('queueEmpty'));
+  $('queueHint').classList.toggle('hidden', !items.length);
 }
 
 async function renderLibrary() {
   const query = $('librarySearch').value.trim().toLocaleLowerCase();
   const all = await getAllItems();
-  const visible = all.filter((item) => (libraryFilter === 'all' || (libraryFilter === 'favorite' ? item.isFavorite : item.status === libraryFilter)) && `${item.term} ${item.meaning} ${item.category} ${item.explanation} ${item.type} ${item.difficulty}`.toLocaleLowerCase().includes(query)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const visible = all.filter((item) => (libraryFilter === 'all' || (libraryFilter === 'favorite' ? item.isFavorite : item.status === libraryFilter)) && `${item.term} ${item.meaning} ${item.category} ${item.explanation} ${item.origin} ${(item.synonyms || []).join(' ')} ${item.type} ${item.difficulty}`.toLocaleLowerCase().includes(query)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   $('libraryCount').textContent = `${all.length} word${all.length === 1 ? '' : 's'}`;
-  $('libraryList').replaceChildren(...visible.map((item) => makeListRow(item, [
-    { label: item.isFavorite ? '★' : '☆', action: () => toggleFavorite(item) },
-    { label: item.status === 'learned' ? 'Learn again' : 'Set review plan', action: async () => { await saveItem(item.status === 'learned' ? { ...item, status: 'review', reviewStage: null, reviewDueDate: todayKey() } : scheduleFirstReview(item)); renderLibrary(); renderReviews(); renderQueue(); loadToday(); } }
-  ])));
+  $('libraryList').replaceChildren(...visible.map((item) => {
+    const dueForReview = item.status === 'review' && item.reviewDueDate && item.reviewDueDate <= todayKey();
+    const marker = item.isFavorite ? '🔖' : item.status === 'review' ? '⟳' : item.status === 'learned' ? '✓' : '◌';
+    return makeWordRow(item, { marker, side: dueForReview ? '✓' : '›', onSideClick: dueForReview ? () => completeReview(item) : null });
+  }));
 }
 
 async function toggleFavorite(item) {
@@ -614,10 +637,8 @@ async function toggleFavorite(item) {
 }
 
 async function renderReviews() {
-  const due = (await getAllItems()).filter((item) => item.status === 'review' && item.reviewDueDate && item.reviewDueDate <= todayKey()).sort((a, b) => a.reviewDueDate.localeCompare(b.reviewDueDate));
-  $('reviewCount').textContent = `${due.length} due`;
-  $('reviewList').replaceChildren(...due.map((item) => makeListRow(item, [{ label: 'Reviewed', action: () => completeReview(item) }])));
-  due.length ? hide($('reviewEmpty')) : show($('reviewEmpty'));
+  // Reviews live in the Library's "Review queue" filter in this layout.
+  return (await getAllItems()).filter((item) => item.status === 'review' && item.reviewDueDate && item.reviewDueDate <= todayKey());
 }
 
 async function completeReview(item) {
@@ -757,7 +778,7 @@ async function copyMasterPrompt() { try { await navigator.clipboard.writeText(MA
 function showToast(message, isError = false) { let toast = $('globalToast'); if (!toast) { toast = document.createElement('div'); toast.id = 'globalToast'; document.body.appendChild(toast); } toast.className = `toast${isError ? ' error' : ''}`; toast.textContent = message; show(toast); clearTimeout(window.wordflowToastTimer); window.wordflowToastTimer = setTimeout(() => hide(toast), 3200); }
 
 window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); deferredInstallPrompt = event; show($('installBtn')); });
-$('installBtn').addEventListener('click', async () => { if (!deferredInstallPrompt) return; deferredInstallPrompt.prompt(); await deferredInstallPrompt.userChoice; deferredInstallPrompt = null; hide($('installBtn')); });
+$('installBtn')?.addEventListener('click', async () => { if (!deferredInstallPrompt) return; deferredInstallPrompt.prompt(); await deferredInstallPrompt.userChoice; deferredInstallPrompt = null; hide($('installBtn')); });
 // Ignore the temporary hash used by a returning magic link until the cloud
 // session has completed its first safe download/upload reconciliation.
 window.addEventListener('hashchange', () => { if (cloudReadyForUserId) navigate(location.hash.slice(1)); });
@@ -767,7 +788,7 @@ async function boot() {
     db = await openDatabase();
     if ('serviceWorker' in navigator) await navigator.serviceWorker.register('/sw.js');
     await loadSettings(); await upgradeStoredItems(); $('masterPrompt').textContent = MASTER_PROMPT;
-    createManualExampleFields(); createReminderTimeFields(); wireEvents();
+    createReminderTimeFields(); wireEvents();
     const cloudReady = await initializeCloudSync();
     if (cloudReady) { scheduleReminders(); navigate(location.hash.slice(1) || 'today'); }
   } catch (error) { console.error(error); document.querySelector('.app-shell').textContent = `WordFlow could not start: ${error.message}`; }

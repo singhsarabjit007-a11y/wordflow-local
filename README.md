@@ -9,9 +9,9 @@ or remember, and the same email can open the same library on another device.
 
 ## What is included
 
-- Daily word with a meaning, explanation, grammar type and five examples
-- Manual word entry and JSON pack import
-- Queue, expanded library search, favourites and browser pronunciation
+- Daily word with pronunciation, grammar type, five examples, origin, and synonyms
+- JSON pack import, with a ready-made details test pack
+- Queue, expanded library search, favourites, review queue, and browser pronunciation
 - Spaced reviews at 1, 3, 7, 21 and 60 days
 - Five configurable push reminders, including while the installed PWA is closed
 - Offline cache plus export/restore backups
@@ -62,8 +62,8 @@ SUPABASE_PUBLISHABLE_KEY=your_publishable_key
 ```
 
 4. Trigger a new deploy.
-5. Open WordFlow, enter your email address, and open the link it sends. In
-   **Settings**, it should say that cloud sync is active for your account.
+5. Open WordFlow, enter your email address, and open the link it sends. The
+   Today screen shows the current cloud-sync status in its top-right corner.
 
 The publishable key is intentionally available to the browser. Security comes
 from Supabase RLS policies in `supabase/schema.sql`, not from hiding that key.
@@ -105,8 +105,10 @@ then use **Run now** in Netlify's Functions view.
 
 ## Import a pack
 
-Use [`sample-packs/feature-test-pack.json`](sample-packs/feature-test-pack.json)
-to test the Import screen. Every vocabulary item needs exactly five examples.
+Use [`sample-packs/details-test-pack.json`](sample-packs/details-test-pack.json)
+to test the final UI. It includes pronunciation, origin, synonyms, and five
+examples for every word. These fields are optional in your own packs; every
+item still needs exactly five examples.
 
 ## Current boundaries
 
