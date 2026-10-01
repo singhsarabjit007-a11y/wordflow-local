@@ -36,7 +36,7 @@ button:disabled { opacity:.55; cursor:wait; }
 .sync-status,.small-status { max-width:118px; color:var(--muted); font-size:.72rem; line-height:1.25; }
 .sync-status { max-width:140px; font-size:.68rem; white-space:nowrap; }
 .word-stage { display:grid; min-height:0; flex:1; align-content:center; justify-items:center; padding:20px 0 15px; text-align:center; }
-.term { max-width:100%; overflow-wrap:anywhere; font-size:clamp(2.9rem,13.5vw,5.2rem); }
+.term { max-width:100%; overflow-wrap:anywhere; font-size:clamp(2.45rem,11.5vw,4.25rem); }
 .word-type { margin:8px 0 22px; color:#89847d; font-family:Georgia,serif; font-size:1.28rem; font-style:italic; }
 .pronunciation { display:flex; align-items:center; gap:10px; border:1px solid rgba(223,220,210,.65); border-radius:999px; padding:9px 15px; background:rgba(255,255,255,.58); color:var(--text); font-size:1.02rem; }
 .pronunciation .icon { width:1.25rem; height:1.25rem; }
@@ -73,6 +73,12 @@ button:disabled { opacity:.55; cursor:wait; }
 /* A panel is always the height of the phone. The list itself, rather than
    the browser page, handles overflow so the bottom navigation never moves. */
 #queueSection { display:grid; grid-template-rows:auto minmax(0,1fr) auto; }
+#queueSection .page-heading { margin:15px 0 16px; text-align:left; }
+#queueSection .page-heading h1 { margin-top:5px; font-size:1.78rem; font-weight:500; letter-spacing:-.025em; }
+#queueSection .page-heading > p { margin-top:5px; }
+#queueSection .queue-row { min-height:84px; padding:14px; }
+#queueSection .row-copy strong { font-size:1.3rem; font-weight:500; }
+#queueSection .row-copy span { margin-top:5px; font-size:.9rem; }
 #queueSection .queue-list { overflow-y:auto; overscroll-behavior:contain; padding:2px 2px 10px; scrollbar-width:none; }
 #queueSection .queue-list::-webkit-scrollbar,#libraryList::-webkit-scrollbar { display:none; }
 
@@ -132,14 +138,15 @@ textarea { width:100%; min-height:126px; margin:0 0 12px; border:0; border-radiu
 .details-panel { position:absolute; right:0; bottom:0; left:0; max-height:86dvh; overflow:auto; padding:14px 23px calc(30px + var(--safe-bottom)); border:1px solid rgba(223,220,210,.82); border-bottom:0; border-radius:30px 30px 0 0; background:var(--surface); box-shadow:0 -12px 42px rgba(42,37,28,.14); }
 .sheet-handle { width:48px; height:6px; margin:0 auto 20px; border-radius:999px; background:#d7d7d7; }
 .close-details { position:absolute; top:18px; right:20px; border:0; background:transparent; color:var(--text); font-size:2.5rem; line-height:.7; }
-.details-panel > h1 { margin:0 36px 27px 0; font-size:2.55rem; }
-.details-panel section { padding:23px 0; border-top:1px solid var(--line); }
-.details-panel section:first-of-type { border-top:0; padding-top:0; }
-.details-panel h2 { margin-bottom:17px; font-size:1.65rem; }
-.detail-examples { display:grid; gap:15px; margin:0; padding:0; list-style:none; counter-reset:examples; }
-.detail-examples li { display:grid; grid-template-columns:42px 1fr; gap:14px; align-items:start; font-size:.97rem; }
-.detail-examples li::before { display:grid; width:37px; height:37px; place-items:center; border-radius:50%; background:var(--soft); content:counter(examples); counter-increment:examples; font-family:Georgia,serif; }
-.details-panel section p { color:#333; font-size:1rem; }
+.details-panel section { padding:19px 0; border-top:1px solid var(--line); }
+.details-panel section:first-of-type { border-top:0; padding-top:3px; }
+.details-panel h2 { margin-bottom:12px; font-size:1.28rem; font-weight:500; letter-spacing:-.02em; }
+/* The numbered examples share one grid so circles and copy never drift out of alignment. */
+.detail-examples { display:grid; gap:0; margin:0; padding:0; list-style:none; counter-reset:examples; }
+.detail-examples li { display:grid; grid-template-columns:34px minmax(0,1fr); gap:13px; align-items:center; padding:8px 0; border-bottom:1px solid rgba(223,220,210,.78); font-size:.94rem; line-height:1.38; }
+.detail-examples li:last-child { border-bottom:0; }
+.detail-examples li::before { display:grid; width:32px; height:32px; place-items:center; border-radius:50%; background:var(--soft); content:counter(examples); counter-increment:examples; font-family:Georgia,serif; font-size:.93rem; }
+.details-panel section p { color:#4a4640; font-size:.95rem; line-height:1.45; }
 
 .auth-panel { max-width:470px; margin:10vh auto; }
 .auth-panel h1 { font-size:2.8rem; }
