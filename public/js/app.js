@@ -641,7 +641,9 @@ async function renderLibrary() {
   $('libraryCount').textContent = `${all.length} word${all.length === 1 ? '' : 's'}`;
   $('libraryList').replaceChildren(...visible.map((item) => {
     const dueForReview = item.status === 'review' && item.reviewDueDate && item.reviewDueDate <= todayKey();
-    const marker = item.isFavorite ? '🔖' : item.status === 'review' ? '⟳' : item.status === 'learned' ? '✓' : '◌';
+    // Keep these status markers quiet and monochrome so the Library does not
+    // introduce the coloured emoji styling that mobile browsers apply.
+    const marker = item.isFavorite ? '★' : item.status === 'review' ? '↻' : item.status === 'learned' ? '✓' : '○';
     return makeWordRow(item, { marker, side: dueForReview ? '✓' : '›', onSideClick: dueForReview ? () => completeReview(item) : null });
   }));
 }
