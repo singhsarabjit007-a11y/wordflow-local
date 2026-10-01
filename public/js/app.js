@@ -38,7 +38,8 @@ let db;
 let settings;
 let currentTodayItem = null;
 let currentImport = null;
-let libraryFilter = 'all';
+let libraryFilter = 'queued';
+let openTopicName = null;
 let reminderTimers = [];
 let deferredInstallPrompt = null;
 let supabaseClient = null;
@@ -86,7 +87,7 @@ async function removeItem(id) { const result = await requestValue(transaction(IT
 async function getSetting(key) { const row = await requestValue(transaction(SETTINGS_STORE).get(key)); return row?.value; }
 async function saveSetting(key, value) { return requestValue(transaction(SETTINGS_STORE, 'readwrite').put({ key, value })); }
 
-function defaultSettings() { return { reminderTimes: DEFAULT_REMINDER_TIMES, todayDate: null, todayItemId: null, remindersEnabled: false, pushEnabled: false, lastChangedAt: null }; }
+function defaultSettings() { return { reminderTimes: DEFAULT_REMINDER_TIMES, todayDate: null, todayItemId: null, selectedTopic: '', remindersEnabled: false, pushEnabled: false, lastChangedAt: null }; }
 async function loadSettings() {
   const saved = await getSetting('app');
   settings = { ...defaultSettings(), ...saved };
@@ -107,8 +108,8 @@ function recordLocalChange() {
 async function upgradeStoredItems() {
   // Existing imports keep working when new optional presentation fields appear.
   for (const item of await getAllItems()) {
-    if (item.isFavorite === undefined || item.reviewStage === undefined || item.reviewDueDate === undefined || item.origin === undefined || item.synonyms === undefined || item.pronunciation === undefined) {
-      await saveItem({ isFavorite: false, reviewStage: null, reviewDueDate: null, origin: '', synonyms: [], pronunciation: '', ...item });
+    if (item.isFavorite === undefined || item.reviewStage === undefined || item.reviewDueDate === undefined || item.origin === undefined || item.synonyms === undefined || item.pronunciation === undefined || item.category === undefined) {
+      await saveItem({ isFavorite: false, reviewStage: null, reviewDueDate: null, origin: '', synonyms: [], pronunciation: '', category: '', ...item });
     }
   }
 }
@@ -389,7 +390,7 @@ async function applyCloudState(payload) {
     createReminderTimeFields();
     scheduleReminders();
     if (settings.pushEnabled) void syncPushSubscription();
-    await Promise.all([loadToday(), renderQueue(), renderReviews(), renderLibrary(), updateNotificationStatus()]);
+    await Promise.all([loadToday(), renderTopics(), renderReviews(), renderLibrary(), updateNotificationStatus()]);
   } finally {
     applyingCloudState = false;
   }
@@ -441,6 +442,8 @@ function wireEvents() {
   $('changeImportBtn').addEventListener('click', resetImportPreview);
   $('copyPromptBtn').addEventListener('click', copyMasterPrompt);
   $('librarySearch').addEventListener('input', renderLibrary);
+  $('topicSelect').addEventListener('change', changeTodayTopic);
+  $('backToTopicsBtn').addEventListener('click', showTopicsOverview);
   $('settingsForm').addEventListener('submit', saveReminderTimes);
   $('exportBtn').addEventListener('click', exportBackup);
   $('restoreFileInput').addEventListener('change', restoreBackup);
@@ -451,15 +454,53 @@ function wireEvents() {
 }
 
 function navigate(section) {
-  const allowed = ['today', 'queue', 'library', 'import', 'settings'];
+  // Old bookmarks to the retired Queue page stay useful by opening Library's
+  // Queue filter instead of leading to a blank route.
+  if (section === 'queue') {
+    libraryFilter = 'queued';
+    section = 'library';
+  }
+  const allowed = ['today', 'topics', 'library', 'import', 'settings'];
   const target = allowed.includes(section) ? section : 'today';
   document.querySelectorAll('[data-section]').forEach((element) => element.classList.toggle('hidden', element.dataset.section !== target));
   document.querySelectorAll('.nav-item').forEach((button) => button.classList.toggle('active', button.dataset.nav === target));
   history.replaceState(null, '', `#${target}`);
   if (target === 'today') loadToday();
-  if (target === 'queue') renderQueue();
+  if (target === 'topics') renderTopics();
   if (target === 'library') renderLibrary();
   if (target === 'settings') createReminderTimeFields();
+}
+
+function topicNameFor(item) { return item.category?.trim() || 'Uncategorized'; }
+function inSelectedTopic(item) { return !settings.selectedTopic || topicNameFor(item) === settings.selectedTopic; }
+function topicProgress(items) { return items.filter((item) => item.status !== 'queued').length; }
+
+async function renderTopicPicker(items) {
+  if (!items) items = await getAllItems();
+  const select = $('topicSelect');
+  const topics = [...new Set(items.map(topicNameFor))].sort((a, b) => a.localeCompare(b));
+  if (settings.selectedTopic && !topics.includes(settings.selectedTopic)) {
+    settings.selectedTopic = '';
+    await persistSettings();
+  }
+  select.replaceChildren();
+  const allOption = document.createElement('option'); allOption.value = ''; allOption.textContent = 'All topics'; select.append(allOption);
+  topics.forEach((topic) => { const option = document.createElement('option'); option.value = topic; option.textContent = topic; select.append(option); });
+  select.value = settings.selectedTopic;
+}
+
+async function changeTodayTopic(event) {
+  const selectedTopic = event.target.value;
+  if (selectedTopic === settings.selectedTopic) return;
+  // Returning an untouched active item to the queue lets a topic change pick
+  // a fresh word without incorrectly scheduling that item for review.
+  const previous = settings.todayItemId ? await getItem(settings.todayItemId) : null;
+  if (previous?.status === 'active') await saveItem({ ...previous, status: 'queued', startedOn: null });
+  settings.selectedTopic = selectedTopic;
+  settings.todayDate = null;
+  settings.todayItemId = null;
+  await persistSettings();
+  await Promise.all([loadToday(), renderTopics(), renderLibrary()]);
 }
 
 async function ensureTodayItem() {
@@ -476,7 +517,7 @@ async function ensureTodayItem() {
   // If the user opens an empty app in the morning and adds words later, choose
   // the first one immediately instead of making them wait for the next day.
   if (isNewDay || !settings.todayItemId) {
-    const queued = (await getAllItems()).filter((item) => item.status === 'queued').sort((a, b) => a.queuePosition - b.queuePosition)[0];
+    const queued = (await getAllItems()).filter((item) => item.status === 'queued' && inSelectedTopic(item)).sort((a, b) => a.queuePosition - b.queuePosition)[0];
     settings.todayDate = date; settings.todayItemId = queued?.id || null;
     if (queued) await saveItem({ ...queued, status: 'active', startedOn: date });
     await persistSettings();
@@ -485,6 +526,8 @@ async function ensureTodayItem() {
 }
 
 async function loadToday() {
+  const allItems = await getAllItems();
+  await renderTopicPicker(allItems);
   currentTodayItem = await ensureTodayItem();
   if (!currentTodayItem) { hide($('todayCard')); show($('todayEmpty')); await updateNotificationStatus(); return; }
   hide($('todayEmpty')); show($('todayCard'));
@@ -495,8 +538,8 @@ async function loadToday() {
   // The import format calls this an explanation; on the Today screen it is a
   // short practical cue for when the word fits naturally in conversation.
   $('todayExplanation').textContent = currentTodayItem.explanation || '';
-  const allItems = await getAllItems();
-  $('todayProgress').style.width = `${Math.min(100, Math.max(8, (allItems.filter((item) => item.status === 'learned').length / Math.max(1, allItems.length)) * 100))}%`;
+  const topicItems = allItems.filter(inSelectedTopic);
+  $('todayProgress').style.width = `${Math.min(100, Math.max(8, (topicItems.filter((item) => item.status === 'learned').length / Math.max(1, topicItems.length)) * 100))}%`;
   $('knowBtn').classList.toggle('is-selected', currentTodayItem.status === 'learned' || currentTodayItem.reviewStage !== null);
   $('reviewBtn').classList.toggle('is-selected', currentTodayItem.status === 'review' && currentTodayItem.reviewStage === null);
   $('favoriteBtn').classList.toggle('is-selected', currentTodayItem.isFavorite);
@@ -550,7 +593,7 @@ async function updateTodayStatus(status) {
   if (status === 'review') updated = { ...updated, reviewDueDate: todayKey(), reviewStage: null };
   await saveItem(updated); currentTodayItem = updated;
   showToast(status === 'learned' ? 'Added to your 1, 3, 7, 21, 60-day review plan.' : 'Added to your review list.');
-  await Promise.all([loadToday(), renderQueue(), renderReviews(), renderLibrary()]);
+  await Promise.all([loadToday(), renderTopics(), renderReviews(), renderLibrary()]);
 }
 
 async function advanceToNextWord() {
@@ -562,7 +605,7 @@ async function advanceToNextWord() {
   }
   settings.todayItemId = null;
   await persistSettings();
-  await Promise.all([loadToday(), renderQueue(), renderLibrary(), renderReviews()]);
+  await Promise.all([loadToday(), renderTopics(), renderLibrary(), renderReviews()]);
   showToast(currentTodayItem ? 'Next word is ready.' : 'Your learning queue is empty.');
 }
 
@@ -625,36 +668,82 @@ async function importPack() {
     existing.add(normalized); imported += 1; position += 1;
   }
   $('importMessage').className = 'message'; $('importMessage').textContent = `Imported ${imported} word${imported === 1 ? '' : 's'}${skipped ? `; skipped ${skipped} duplicate${skipped === 1 ? '' : 's'}` : ''}.`; show($('importMessage'));
-  await Promise.all([loadToday(), renderQueue(), renderLibrary()]);
+  await Promise.all([loadToday(), renderTopics(), renderLibrary()]);
 }
 
 function makeWordRow(item, { marker, side, kind = 'library', onSideClick } = {}) {
   const row = document.createElement('article'); row.className = `${kind}-row`;
-  const badge = document.createElement('div'); badge.className = kind === 'queue' ? 'queue-number' : `library-mark${item.status === 'learned' ? ' learned' : ''}`; badge.textContent = marker;
+  const badge = document.createElement('div'); badge.className = kind === 'topic' ? 'topic-number' : `library-mark${item.status === 'learned' ? ' learned' : ''}`; badge.textContent = marker;
   const copy = document.createElement('button'); copy.className = 'row-copy'; copy.type = 'button'; copy.setAttribute('aria-label', `View details for ${item.term}`); copy.addEventListener('click', () => openDetails(item));
   const term = document.createElement('strong'); term.textContent = item.term;
   // Definitions move into the list item's detail sheet, keeping each card
   // symmetrical even when words have meanings of very different lengths.
   row.classList.add('term-only');
   copy.append(term);
-  const tail = document.createElement(onSideClick ? 'button' : 'span'); tail.className = `row-side${kind === 'queue' ? ' queue-handle' : ''}`; tail.textContent = side;
+  const tail = document.createElement(onSideClick ? 'button' : 'span'); tail.className = 'row-side'; tail.textContent = side;
   if (onSideClick) { tail.type = 'button'; tail.setAttribute('aria-label', `Review ${item.term}`); tail.addEventListener('click', onSideClick); }
   row.append(badge, copy, tail);
   return row;
 }
 
-async function renderQueue() {
-  const items = (await getAllItems()).filter((item) => item.status === 'queued').sort((a, b) => a.queuePosition - b.queuePosition);
-  $('queueCount').textContent = `${items.length} word${items.length === 1 ? '' : 's'}`;
-  $('queueList').replaceChildren(...items.map((item, index) => makeWordRow(item, { kind: 'queue', marker: String(index + 1), side: '☰' })));
-  items.length ? hide($('queueEmpty')) : show($('queueEmpty'));
-  $('queueHint').classList.toggle('hidden', !items.length);
+async function renderTopics() {
+  const items = await getAllItems();
+  const groups = new Map();
+  items.forEach((item) => {
+    const topic = topicNameFor(item);
+    if (!groups.has(topic)) groups.set(topic, []);
+    groups.get(topic).push(item);
+  });
+  $('topicsCount').textContent = `${groups.size} topic${groups.size === 1 ? '' : 's'}`;
+  const cards = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([topic, topicItems]) => makeTopicCard(topic, topicItems));
+  $('topicsList').replaceChildren(...cards);
+  cards.length ? hide($('topicsEmpty')) : show($('topicsEmpty'));
+  if (openTopicName && groups.has(openTopicName)) await renderTopicWords(openTopicName, groups.get(openTopicName));
+  else if (openTopicName) showTopicsOverview();
+}
+
+function makeTopicCard(topic, items) {
+  const card = document.createElement('button'); card.className = 'topic-card'; card.type = 'button'; card.setAttribute('aria-label', `Open ${topic}`);
+  const mark = document.createElement('span'); mark.className = 'topic-mark'; mark.textContent = topic.slice(0, 1).toLocaleUpperCase();
+  const copy = document.createElement('span'); copy.className = 'topic-card-copy';
+  const name = document.createElement('strong'); name.textContent = topic;
+  const count = document.createElement('span'); count.textContent = `${topicProgress(items)} / ${items.length} words covered`;
+  const track = document.createElement('span'); track.className = 'topic-progress';
+  const fill = document.createElement('span'); fill.style.width = `${items.length ? (topicProgress(items) / items.length) * 100 : 0}%`; track.append(fill);
+  copy.append(name, count, track);
+  const arrow = document.createElement('span'); arrow.className = 'row-side'; arrow.textContent = '›';
+  card.append(mark, copy, arrow);
+  card.addEventListener('click', () => openTopic(topic));
+  return card;
+}
+
+async function openTopic(topic) {
+  openTopicName = topic;
+  hide($('topicsOverview')); show($('topicDetail'));
+  const items = (await getAllItems()).filter((item) => topicNameFor(item) === topic);
+  await renderTopicWords(topic, items);
+}
+
+async function renderTopicWords(topic, items) {
+  if (!items) items = (await getAllItems()).filter((item) => topicNameFor(item) === topic);
+  $('topicBreadcrumb').textContent = `TOPICS / ${topic}`;
+  $('topicDetailName').textContent = topic;
+  $('topicDetailCount').textContent = `${topicProgress(items)} / ${items.length} words covered`;
+  $('topicDetailProgress').style.width = `${items.length ? (topicProgress(items) / items.length) * 100 : 0}%`;
+  const queued = items.filter((item) => item.status === 'queued').sort((a, b) => a.queuePosition - b.queuePosition);
+  $('topicWordList').replaceChildren(...queued.map((item, index) => makeWordRow(item, { kind: 'topic', marker: String(index + 1), side: '›' })));
+  queued.length ? hide($('topicWordsEmpty')) : show($('topicWordsEmpty'));
+}
+
+function showTopicsOverview() {
+  openTopicName = null;
+  hide($('topicDetail')); show($('topicsOverview'));
 }
 
 async function renderLibrary() {
   const query = $('librarySearch').value.trim().toLocaleLowerCase();
   const all = await getAllItems();
-  const visible = all.filter((item) => (libraryFilter === 'all' || (libraryFilter === 'favorite' ? item.isFavorite : item.status === libraryFilter)) && `${item.term} ${item.meaning} ${item.category} ${item.explanation} ${item.origin} ${(item.synonyms || []).join(' ')} ${item.type} ${item.difficulty}`.toLocaleLowerCase().includes(query)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const visible = all.filter((item) => (libraryFilter === 'favorite' ? item.isFavorite : item.status === libraryFilter) && `${item.term} ${item.meaning} ${item.category} ${item.explanation} ${item.origin} ${(item.synonyms || []).join(' ')} ${item.type} ${item.difficulty}`.toLocaleLowerCase().includes(query)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   $('libraryCount').textContent = `${all.length} word${all.length === 1 ? '' : 's'}`;
   $('libraryList').replaceChildren(...visible.map((item) => {
     const dueForReview = item.status === 'review' && item.reviewDueDate && item.reviewDueDate <= todayKey();
@@ -674,7 +763,7 @@ async function toggleFavorite(item) {
 }
 
 async function renderReviews() {
-  // Reviews live in the Library's "Review queue" filter in this layout.
+  // Reviews live in the Library's "Review" filter in this layout.
   return (await getAllItems()).filter((item) => item.status === 'review' && item.reviewDueDate && item.reviewDueDate <= todayKey());
 }
 
@@ -806,7 +895,7 @@ async function restoreBackup(event) {
       if (!VALID_STATUSES.has(item.status)) throw new Error('The backup contains an invalid item status.');
       await saveItem(item);
     }
-    settings = { ...defaultSettings(), ...backup.settings }; await persistSettings(); createReminderTimeFields(); scheduleReminders(); await Promise.all([loadToday(), renderQueue(), renderLibrary(), updateNotificationStatus()]); showBackupMessage('Backup restored successfully.');
+    settings = { ...defaultSettings(), ...backup.settings }; await persistSettings(); createReminderTimeFields(); scheduleReminders(); await Promise.all([loadToday(), renderTopics(), renderLibrary(), updateNotificationStatus()]); showBackupMessage('Backup restored successfully.');
   } catch (error) { showBackupMessage(error.message, true); } finally { event.target.value = ''; }
 }
 

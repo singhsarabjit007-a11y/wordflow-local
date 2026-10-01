@@ -9,6 +9,7 @@ button { cursor:pointer; -webkit-tap-highlight-color:transparent; }
 .icon { width:1.45rem; height:1.45rem; flex:0 0 auto; fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:1.7; }
 button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px solid var(--text); outline-offset:3px; }
 .hidden { display:none !important; }
+.sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; }
 .wide { width:100%; }
 .app-shell { width:100%; height:100dvh; max-height:100dvh; overflow:hidden; }
 .content { width:min(760px,100%); height:100dvh; min-height:0; margin:0 auto; overflow:hidden; padding:28px 22px calc(88px + var(--safe-bottom)); }
@@ -29,6 +30,9 @@ button:disabled { opacity:.55; cursor:wait; }
 .today-head > :first-child { min-width:0; flex:1; }
 .progress-track { width:min(100%,290px); height:8px; margin-top:15px; overflow:hidden; border-radius:999px; background:#e9e7df; }
 .progress-track span { display:block; width:25%; height:100%; border-radius:inherit; background:#aaa69e; }
+.topic-picker { position:relative; display:inline-block; max-width:100%; margin-top:12px; }
+.topic-picker select { max-width:100%; appearance:none; border:1px solid var(--line); border-radius:999px; padding:7px 31px 7px 12px; background:rgba(255,255,255,.5); color:#514d47; font-size:.73rem; font-weight:650; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.topic-picker::after { position:absolute; right:12px; top:50%; width:6px; height:6px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; content:""; pointer-events:none; transform:translateY(-70%) rotate(45deg); }
 .sync-indicator { display:grid; justify-items:center; gap:6px; min-width:112px; text-align:center; }
 .sync-btn { display:grid; width:46px; height:46px; place-items:center; border:1px solid var(--line); border-radius:50%; background:rgba(255,255,255,.42); color:var(--text); line-height:1; }
 .sync-btn .icon { width:1.35rem; height:1.35rem; }
@@ -58,29 +62,16 @@ button:disabled { opacity:.55; cursor:wait; }
 .page-heading > p { margin-top:9px; }
 .page-count { font-size:1rem; }
 .compact-heading { margin-top:16px; }
-.queue-list,.library-list { display:grid; min-height:0; gap:14px; }
-.queue-row,.library-row { display:flex; align-items:center; gap:15px; min-height:88px; padding:15px; border:1px solid rgba(223,220,210,.76); border-radius:23px; background:rgba(255,255,255,.48); box-shadow:var(--shadow); }
-.queue-number,.library-mark { display:grid; width:46px; height:46px; flex:0 0 46px; place-items:center; border:1px solid #3b3934; border-radius:50%; font-family:Georgia,serif; font-size:1.2rem; }
+.library-list,.topic-word-list { display:grid; min-height:0; gap:12px; align-content:start; grid-auto-rows:max-content; }
+.library-row,.topic-row { display:flex; align-items:center; gap:15px; height:72px; padding:13px 15px; border:1px solid rgba(223,220,210,.76); border-radius:21px; background:rgba(255,255,255,.48); box-shadow:var(--shadow); }
+.topic-number,.library-mark { display:grid; width:42px; height:42px; flex:0 0 42px; place-items:center; border:1px solid #3b3934; border-radius:50%; font-family:Georgia,serif; font-size:1.08rem; }
 .library-mark { border:0; background:rgba(235,233,225,.78); font-family:inherit; font-size:1rem; }
 .library-mark.learned { background:var(--text); color:white; }
 .row-copy { min-width:0; flex:1; border:0; padding:0; background:transparent; color:var(--text); text-align:left; }
 .row-copy strong { display:block; overflow-wrap:anywhere; font-family:Georgia,serif; font-size:1.5rem; line-height:1.08; }
 .row-copy span { display:block; overflow-wrap:anywhere; margin-top:6px; color:#68635c; font-family:Georgia,serif; font-size:.95rem; line-height:1.27; }
 .row-side { border:0; padding:0; background:transparent; color:#77726b; font-size:1.35rem; }
-.queue-handle { font-size:1.35rem; letter-spacing:-.15em; }
 .quiet-center { margin:31px 0; text-align:center; font-size:.83rem; }
-
-/* A panel is always the height of the phone. The list itself, rather than
-   the browser page, handles overflow so the bottom navigation never moves. */
-#queueSection { display:grid; grid-template-rows:auto minmax(0,1fr) auto; }
-#queueSection .page-heading { margin:15px 0 16px; text-align:left; }
-#queueSection .page-heading h1 { margin-top:5px; font-size:1.78rem; font-weight:500; letter-spacing:-.025em; }
-#queueSection .page-heading > p { margin-top:5px; }
-#queueSection .queue-row { min-height:84px; padding:14px; }
-#queueSection .row-copy strong { font-size:1.3rem; font-weight:500; }
-#queueSection .row-copy span { margin-top:5px; font-size:.9rem; }
-#queueSection .queue-list { overflow-y:auto; overscroll-behavior:contain; padding:2px 2px 10px; scrollbar-width:none; }
-#queueSection .queue-list::-webkit-scrollbar,#libraryList::-webkit-scrollbar { display:none; }
 
 /* Library */
 .search-box { display:flex; align-items:center; gap:12px; padding:13px 17px; border:1px solid rgba(223,220,210,.76); border-radius:22px; background:rgba(255,255,255,.52); box-shadow:var(--shadow); }
@@ -95,8 +86,28 @@ button:disabled { opacity:.55; cursor:wait; }
 #librarySection .page-heading > p { margin-top:5px; }
 #librarySection .filter-row { min-width:0; margin:0; padding:13px 0 14px; overscroll-behavior-x:contain; }
 #libraryList { min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:2px 2px 12px; scrollbar-width:none; }
-.queue-row.term-only,.library-row.term-only { min-height:70px; }
-.term-only .row-copy strong { font-size:1.28rem; font-weight:500; }
+#libraryList::-webkit-scrollbar,.topic-word-list::-webkit-scrollbar,.topics-list::-webkit-scrollbar { display:none; }
+.library-row.term-only,.topic-row.term-only { height:72px; }
+.term-only .row-copy strong { overflow:hidden; font-size:1.28rem; font-weight:500; text-overflow:ellipsis; white-space:nowrap; }
+
+/* Topics keeps topic-level progress separate from the Library's global filters. */
+#topicsSection { height:100%; min-height:0; }
+.topics-view { display:grid; height:100%; min-height:0; grid-template-rows:auto minmax(0,1fr); }
+#topicsSection .page-heading,.topic-detail-heading { margin:15px 0 14px; text-align:left; }
+#topicsSection .page-heading h1,.topic-detail-heading h1 { margin-top:5px; font-size:1.78rem; font-weight:500; letter-spacing:-.025em; }
+#topicsSection .page-heading > p,.topic-detail-heading > p { margin-top:5px; }
+.topics-list,.topic-word-list { min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:2px 2px 12px; scrollbar-width:none; }
+.topic-card { display:grid; width:100%; grid-template-columns:44px minmax(0,1fr) auto; gap:13px; align-items:center; margin-bottom:12px; padding:14px; border:1px solid rgba(223,220,210,.76); border-radius:21px; background:rgba(255,255,255,.48); color:var(--text); text-align:left; box-shadow:var(--shadow); }
+.topic-mark { display:grid; width:42px; height:42px; place-items:center; border-radius:50%; background:var(--soft); font-family:Georgia,serif; font-size:1.05rem; }
+.topic-card-copy { display:grid; min-width:0; gap:4px; }
+.topic-card-copy strong { overflow:hidden; font-family:Georgia,serif; font-size:1.2rem; font-weight:500; line-height:1.1; text-overflow:ellipsis; white-space:nowrap; }
+.topic-card-copy > span:not(.topic-progress) { color:var(--muted); font-size:.78rem; }
+.topic-progress { display:block; width:100%; height:6px; overflow:hidden; margin-top:3px; border-radius:999px; background:#e9e7df; }
+.topic-progress span { display:block; height:100%; border-radius:inherit; background:#aaa69e; }
+.back-to-topics { justify-self:start; margin:11px 0 0; border:0; padding:0; background:transparent; color:#5e5952; font-size:.8rem; text-decoration:underline; }
+#topicDetail { grid-template-rows:auto auto minmax(0,1fr) auto; }
+.topic-detail-heading { margin-top:11px; }
+.topic-detail-heading .topic-progress { margin-top:11px; }
 
 /* Import */
 .import-card,.settings-card,.auth-panel { margin-bottom:14px; padding:21px; border:1px solid rgba(223,220,210,.78); border-radius:24px; background:rgba(255,255,255,.5); box-shadow:var(--shadow); }
