@@ -598,24 +598,20 @@ function validatePack(payload) {
   payload.items.forEach((item, index) => validateItem(item, `Item ${index + 1}`)); return payload;
 }
 
-async function readFileImport(event) { const file = event.target.files?.[0]; if (!file) return; try { previewImport(JSON.parse(await file.text())); } catch (error) { showToast(`Could not read that JSON: ${error.message}`, true); } }
-function previewPastedImport() { try { previewImport(JSON.parse($('jsonPaste').value)); } catch (error) { showToast(`Could not read that JSON: ${error.message}`, true); } }
-function previewImport(payload) {
+async function readFileImport(event) { const file = event.target.files?.[0]; if (!file) return; try { previewImport(JSON.parse(await file.text()), file.name); } catch (error) { showToast(`Could not read that JSON: ${error.message}`, true); } }
+function previewPastedImport() { try { previewImport(JSON.parse($('jsonPaste').value), 'Pasted JSON'); } catch (error) { showToast(`Could not read that JSON: ${error.message}`, true); } }
+function previewImport(payload, sourceName) {
   currentImport = validatePack(payload);
-  $('previewPackName').textContent = currentImport.pack.name;
-  $('previewPackMeta').textContent = `${currentImport.items.length} items · ${currentImport.pack.difficulty || 'Mixed difficulty'} · ${currentImport.pack.topic || 'General'}`;
-  $('previewTerms').replaceChildren(...currentImport.items.map((item) => { const chip = document.createElement('span'); chip.textContent = item.term; return chip; }));
   hide($('importMessage'));
-  hide($('fileImportCard')); hide($('pasteImportCard')); hide($('copyPromptBtn'));
-  $('importSection').classList.add('is-previewing');
-  show($('importPreview'));
+  $('selectedFileName').textContent = sourceName;
+  $('selectedFileSummary').textContent = `${currentImport.items.length} word${currentImport.items.length === 1 ? '' : 's'} ready to import`;
+  hide($('fileImportEmpty')); show($('selectedFileState'));
 }
 
 function resetImportPreview() {
   currentImport = null;
-  hide($('importPreview'));
-  show($('fileImportCard')); show($('pasteImportCard')); show($('copyPromptBtn'));
-  $('importSection').classList.remove('is-previewing');
+  $('jsonFileInput').value = '';
+  hide($('selectedFileState')); show($('fileImportEmpty'));
 }
 
 async function importPack() {

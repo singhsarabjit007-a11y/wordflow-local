@@ -122,7 +122,6 @@ textarea { width:100%; min-height:126px; margin:0 0 12px; border:0; border-radiu
 .time-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:11px; margin-bottom:15px; }
 .time-grid label { position:relative; }
 .time-grid label:nth-child(5) { grid-column:1; }
-.time-grid label::after { position:absolute; right:14px; top:15px; content:"⌄"; pointer-events:none; font-size:1.3rem; }
 .time-grid input { width:100%; border:1px solid var(--line); border-radius:15px; padding:12px 13px; background:rgba(244,242,235,.72); color:var(--text); font-family:Georgia,serif; font-size:1.15rem; }
 .reminder-notification { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:14px; }
 .reminder-notification .small-status { max-width:none; text-align:right; }
@@ -173,11 +172,18 @@ textarea { width:100%; min-height:126px; margin:0 0 12px; border:0; border-radiu
 #importSection .page-heading h1,#settingsSection .page-heading h1 { margin-top:5px; font-size:1.78rem; font-weight:500; letter-spacing:-.025em; }
 #importSection .page-heading > p { margin-top:4px; font-size:.9rem; }
 #importSection .import-card,#settingsSection .settings-card { margin-bottom:10px; padding:15px 17px; border-radius:20px; }
-#importSection .primary-import { display:grid; grid-template-columns:48px minmax(0,1fr); justify-items:start; column-gap:12px; padding:16px 17px; text-align:left; }
-#importSection .primary-import .import-icon { grid-row:span 3; width:48px; height:48px; margin:0; font-size:1.55rem; }
-#importSection .primary-import h2 { align-self:end; font-size:1.16rem; font-weight:500; }
-#importSection .primary-import p { align-self:start; margin:0; font-size:.83rem; }
-#importSection .primary-import .file-button { margin-top:9px; }
+#importSection .primary-import { display:grid; grid-template-columns:48px minmax(0,1fr); align-items:center; column-gap:12px; padding:16px 17px; text-align:left; }
+#importSection .primary-import .import-icon { width:48px; height:48px; margin:0; font-size:1.55rem; }
+#importSection .file-import-empty { min-width:0; }
+#importSection .file-import-empty h2 { font-size:1.16rem; font-weight:500; }
+#importSection .file-import-empty p { margin:2px 0 0; font-size:.83rem; }
+#importSection .file-import-empty .file-button { margin-top:9px; }
+.selected-file-state { display:grid; min-width:0; grid-template-columns:minmax(0,1fr) auto; gap:7px 10px; align-items:center; }
+.selected-file-copy { min-width:0; }
+.selected-file-copy strong { display:block; overflow:hidden; color:var(--text); font-size:.91rem; font-weight:650; text-overflow:ellipsis; white-space:nowrap; }
+.selected-file-copy span { display:block; margin-top:4px; color:var(--muted); font-size:.78rem; }
+.selected-file-state .dark-btn { padding:8px 13px; font-size:.82rem; }
+.selected-file-state .text-button { grid-column:1 / -1; justify-self:start; font-size:.73rem; }
 #importSection .outline-btn { padding:9px 15px; }
 #importSection .import-title,#settingsSection .settings-title { gap:10px; margin-bottom:10px; }
 #importSection .import-title > .icon,#settingsSection .settings-title > .icon { width:1.4rem; height:1.4rem; }
@@ -187,17 +193,9 @@ textarea { width:100%; min-height:126px; margin:0 0 12px; border:0; border-radiu
 #importSection textarea { min-height:64px; height:64px; margin-bottom:8px; padding:9px 11px; font-size:.72rem; }
 #importSection textarea { resize:none; }
 #importSection .prompt-link { font-size:.88rem; }
-#importSection.is-previewing { display:grid; grid-template-rows:auto minmax(0,1fr); }
-#importSection.is-previewing .page-heading { margin-bottom:10px; }
-#importSection.is-previewing #importPreview { align-self:start; margin:0; padding:16px 17px; }
-#importSection.is-previewing #previewPackName { margin-top:5px; font-size:1.3rem; font-weight:500; }
-#importSection.is-previewing #previewPackMeta { font-size:.78rem; line-height:1.35; }
-#importSection.is-previewing .preview-terms { max-height:32px; overflow:hidden; margin:10px 0; flex-wrap:nowrap; }
-#importSection.is-previewing .dark-btn { padding:10px 14px; }
-#importSection.is-previewing .text-button { display:block; margin:12px auto 0; }
 #settingsSection .time-grid { gap:8px; margin-bottom:10px; }
 #settingsSection .time-grid input { border-radius:13px; padding:9px 10px; font-size:1rem; }
-#settingsSection .time-grid label::after { top:7px; right:10px; font-size:1.1rem; }
+#settingsSection .settings-title > .icon { width:1.45rem; height:1.45rem; }
 #settingsSection .reminder-notification { margin-top:8px; }
 #settingsSection .backup-actions { gap:8px; }
 #settingsSection .backup-actions .outline-btn { padding:8px 5px; font-size:.78rem; }
