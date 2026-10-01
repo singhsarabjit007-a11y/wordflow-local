@@ -90,9 +90,13 @@ button:disabled { opacity:.55; cursor:wait; }
 .filter-chip { flex:0 0 auto; border:1px solid var(--line); border-radius:999px; padding:8px 14px; background:transparent; color:#6b665f; font-size:.78rem; font-weight:650; }
 .filter-chip.active { border-color:transparent; background:var(--soft); color:var(--text); }
 #librarySection { display:grid; grid-template-rows:auto auto auto minmax(0,1fr); }
-#librarySection .page-heading { margin-bottom:14px; }
+#librarySection .page-heading { margin:15px 0 14px; text-align:left; }
+#librarySection .page-heading h1 { margin-top:5px; font-size:1.78rem; font-weight:500; letter-spacing:-.025em; }
+#librarySection .page-heading > p { margin-top:5px; }
 #librarySection .filter-row { min-width:0; margin:0; padding:13px 0 14px; overscroll-behavior-x:contain; }
 #libraryList { min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:2px 2px 12px; scrollbar-width:none; }
+.queue-row.term-only,.library-row.term-only { min-height:70px; }
+.term-only .row-copy strong { font-size:1.28rem; font-weight:500; }
 
 /* Import */
 .import-card,.settings-card,.auth-panel { margin-bottom:14px; padding:21px; border:1px solid rgba(223,220,210,.78); border-radius:24px; background:rgba(255,255,255,.5); box-shadow:var(--shadow); }
@@ -147,6 +151,9 @@ textarea { width:100%; min-height:126px; margin:0 0 12px; border:0; border-radiu
 .detail-examples li:last-child { border-bottom:0; }
 .detail-examples li::before { display:grid; width:32px; height:32px; place-items:center; border-radius:50%; background:var(--soft); content:counter(examples); counter-increment:examples; font-family:Georgia,serif; font-size:.93rem; }
 .details-panel section p { color:#4a4640; font-size:.95rem; line-height:1.45; }
+.detail-context { margin:2px 34px 15px 0; padding-bottom:15px; border-bottom:1px solid var(--line); }
+.detail-context #detailTerm { color:var(--text); font-family:Georgia,serif; font-size:1.5rem; font-weight:500; line-height:1.1; }
+.detail-context #detailMeaning { margin-top:6px; color:#4a4640; font-size:.96rem; line-height:1.42; }
 
 .auth-panel { max-width:470px; margin:10vh auto; }
 .auth-panel h1 { font-size:2.8rem; }
@@ -162,24 +169,32 @@ textarea { width:100%; min-height:126px; margin:0 0 12px; border:0; border-radiu
 
 /* Import and Settings are the two utility screens people should be able to
    use in one glance. The denser layout avoids vertical scrolling on phones. */
-#importSection .page-heading,#settingsSection .page-heading { margin:10px 0 16px; }
-#importSection .page-heading h1,#settingsSection .page-heading h1 { font-size:clamp(2.35rem,10vw,3.45rem); }
+#importSection .page-heading,#settingsSection .page-heading { margin:15px 0 14px; text-align:left; }
+#importSection .page-heading h1,#settingsSection .page-heading h1 { margin-top:5px; font-size:1.78rem; font-weight:500; letter-spacing:-.025em; }
 #importSection .page-heading > p { margin-top:4px; font-size:.9rem; }
 #importSection .import-card,#settingsSection .settings-card { margin-bottom:10px; padding:15px 17px; border-radius:20px; }
 #importSection .primary-import { display:grid; grid-template-columns:48px minmax(0,1fr); justify-items:start; column-gap:12px; padding:16px 17px; text-align:left; }
 #importSection .primary-import .import-icon { grid-row:span 3; width:48px; height:48px; margin:0; font-size:1.55rem; }
-#importSection .primary-import h2 { align-self:end; font-size:1.45rem; }
+#importSection .primary-import h2 { align-self:end; font-size:1.16rem; font-weight:500; }
 #importSection .primary-import p { align-self:start; margin:0; font-size:.83rem; }
 #importSection .primary-import .file-button { margin-top:9px; }
 #importSection .outline-btn { padding:9px 15px; }
 #importSection .import-title,#settingsSection .settings-title { gap:10px; margin-bottom:10px; }
 #importSection .import-title > .icon,#settingsSection .settings-title > .icon { width:1.4rem; height:1.4rem; }
-#importSection .import-title h2,#settingsSection .settings-title h2 { font-size:1.38rem; }
+#importSection .import-title h2,#settingsSection .settings-title h2 { font-size:1.16rem; font-weight:500; }
 #importSection .import-title p,#settingsSection .settings-title p { margin-top:1px; font-size:.78rem; }
 #importSection .import-card p { margin-bottom:9px; }
 #importSection textarea { min-height:64px; height:64px; margin-bottom:8px; padding:9px 11px; font-size:.72rem; }
 #importSection textarea { resize:none; }
 #importSection .prompt-link { font-size:.88rem; }
+#importSection.is-previewing { display:grid; grid-template-rows:auto minmax(0,1fr); }
+#importSection.is-previewing .page-heading { margin-bottom:10px; }
+#importSection.is-previewing #importPreview { align-self:start; margin:0; padding:16px 17px; }
+#importSection.is-previewing #previewPackName { margin-top:5px; font-size:1.3rem; font-weight:500; }
+#importSection.is-previewing #previewPackMeta { font-size:.78rem; line-height:1.35; }
+#importSection.is-previewing .preview-terms { max-height:32px; overflow:hidden; margin:10px 0; flex-wrap:nowrap; }
+#importSection.is-previewing .dark-btn { padding:10px 14px; }
+#importSection.is-previewing .text-button { display:block; margin:12px auto 0; }
 #settingsSection .time-grid { gap:8px; margin-bottom:10px; }
 #settingsSection .time-grid input { border-radius:13px; padding:9px 10px; font-size:1rem; }
 #settingsSection .time-grid label::after { top:7px; right:10px; font-size:1.1rem; }

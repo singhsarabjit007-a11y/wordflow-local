@@ -438,6 +438,7 @@ function wireEvents() {
   $('jsonFileInput').addEventListener('change', readFileImport);
   $('previewPasteBtn').addEventListener('click', previewPastedImport);
   $('importBtn').addEventListener('click', importPack);
+  $('changeImportBtn').addEventListener('click', resetImportPreview);
   $('copyPromptBtn').addEventListener('click', copyMasterPrompt);
   $('librarySearch').addEventListener('input', renderLibrary);
   $('settingsForm').addEventListener('submit', saveReminderTimes);
@@ -507,6 +508,14 @@ function openDetails(item) {
   // passed here accidentally: only an actual vocabulary item is valid data.
   const selectedItem = item?.term ? item : currentTodayItem;
   if (!selectedItem) return;
+  // The Today action already presents the definition on its own screen. List
+  // cards hide it for symmetry, then reveal it only in their detail view.
+  const openedFromCollection = Boolean(item?.term);
+  $('detailContext').classList.toggle('hidden', !openedFromCollection);
+  if (openedFromCollection) {
+    $('detailTerm').textContent = selectedItem.term;
+    $('detailMeaning').textContent = selectedItem.meaning;
+  }
   // Older imported packs did not include every optional detail. Keep the
   // sheet useful (and avoid a blank panel) when opening one of those words.
   const examples = Array.isArray(selectedItem.examples) && selectedItem.examples.length
@@ -596,7 +605,17 @@ function previewImport(payload) {
   $('previewPackName').textContent = currentImport.pack.name;
   $('previewPackMeta').textContent = `${currentImport.items.length} items · ${currentImport.pack.difficulty || 'Mixed difficulty'} · ${currentImport.pack.topic || 'General'}`;
   $('previewTerms').replaceChildren(...currentImport.items.map((item) => { const chip = document.createElement('span'); chip.textContent = item.term; return chip; }));
-  hide($('importMessage')); show($('importPreview'));
+  hide($('importMessage'));
+  hide($('fileImportCard')); hide($('pasteImportCard')); hide($('copyPromptBtn'));
+  $('importSection').classList.add('is-previewing');
+  show($('importPreview'));
+}
+
+function resetImportPreview() {
+  currentImport = null;
+  hide($('importPreview'));
+  show($('fileImportCard')); show($('pasteImportCard')); show($('copyPromptBtn'));
+  $('importSection').classList.remove('is-previewing');
 }
 
 async function importPack() {
@@ -618,8 +637,10 @@ function makeWordRow(item, { marker, side, kind = 'library', onSideClick } = {})
   const badge = document.createElement('div'); badge.className = kind === 'queue' ? 'queue-number' : `library-mark${item.status === 'learned' ? ' learned' : ''}`; badge.textContent = marker;
   const copy = document.createElement('button'); copy.className = 'row-copy'; copy.type = 'button'; copy.setAttribute('aria-label', `View details for ${item.term}`); copy.addEventListener('click', () => openDetails(item));
   const term = document.createElement('strong'); term.textContent = item.term;
-  const meaning = document.createElement('span'); meaning.textContent = item.meaning;
-  copy.append(term, meaning);
+  // Definitions move into the list item's detail sheet, keeping each card
+  // symmetrical even when words have meanings of very different lengths.
+  row.classList.add('term-only');
+  copy.append(term);
   const tail = document.createElement(onSideClick ? 'button' : 'span'); tail.className = `row-side${kind === 'queue' ? ' queue-handle' : ''}`; tail.textContent = side;
   if (onSideClick) { tail.type = 'button'; tail.setAttribute('aria-label', `Review ${item.term}`); tail.addEventListener('click', onSideClick); }
   row.append(badge, copy, tail);
