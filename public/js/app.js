@@ -50,6 +50,8 @@ let cloudSyncTimer = null;
 let cloudRealtimeChannel = null;
 let cloudRealtimeUserId = null;
 let applyingCloudState = false;
+let serviceWorkerRegistration = null;
+let refreshingForUpdate = false;
 
 const $ = (id) => document.getElementById(id);
 const show = (element) => element?.classList.remove('hidden');
@@ -119,13 +121,23 @@ function setCloudStatus(message, isError = false) {
   if (!status) return;
   status.textContent = message;
   status.classList.toggle('error-text', isError);
+  updateSyncControl(isError);
 }
 
-// The app stays behind this small gate until Supabase knows whose private
-// cloud record it should read. This UI never deletes the offline copy.
+function updateSyncControl(isError = false) {
+  const button = $('syncNowBtn');
+  if (!button) return;
+  const signedIn = Boolean(supabaseSession);
+  const connected = Boolean(cloudReadyForUserId);
+  button.classList.toggle('is-connected', connected);
+  button.classList.toggle('is-error', isError);
+  $('syncMenuStatus').textContent = connected ? 'Cloud sync active' : signedIn ? $('cloudStatus').textContent : 'Not signed in to cloud sync';
+  $('syncMenuBtn').classList.toggle('hidden', !signedIn);
+  $('signInBtn').classList.toggle('hidden', signedIn);
+}
+
+// This is an optional sign-in sheet. The local library stays visible behind it.
 function showAuthGate(message = '', isError = false) {
-  hide($('appContent'));
-  hide($('bottomNav'));
   show($('authGate'));
   if (message) setAuthMessage(message, isError);
 }
@@ -176,12 +188,10 @@ async function initializeCloudSync() {
   const config = await getCloudConfig();
   if (!config) {
     setCloudStatus('Cloud sync is not configured. Your data remains on this device.', true);
-    showAuthGate('Cloud setup needs attention. Please try again after the site is configured.', true);
     return false;
   }
   if (!window.supabase) {
     setCloudStatus('Cloud sync library could not load. Working offline.', true);
-    showAuthGate('Cloud sign-in could not load. Please refresh and try again.', true);
     return false;
   }
 
@@ -197,28 +207,26 @@ async function initializeCloudSync() {
     supabaseSession = current.session;
 
     // This also catches a successful magic-link return without requiring a
-    // page refresh. An expired session simply reveals the sign-in gate.
+    // page refresh. An expired session simply leaves cloud sync optional.
     supabaseClient.auth.onAuthStateChange((_event, session) => {
       supabaseSession = session;
       if (!session) {
         cloudReadyForUserId = null;
         void stopCloudRealtime();
-        showAuthGate('Enter your email to continue syncing your WordFlow library.');
+        setCloudStatus('Not signed in. Your library stays on this device.');
         return;
       }
       void activateCloudSession();
     });
 
     if (!supabaseSession) {
-      setCloudStatus('Sign in to sync your library across devices.');
-      showAuthGate('Enter your email and we’ll send a secure sign-in link.');
+      setCloudStatus('Not signed in. Tap sync to connect your library.');
       return false;
     }
     return activateCloudSession();
   } catch (error) {
     console.warn('WordFlow cloud sync unavailable:', error);
     setCloudStatus('Cloud setup needs attention. WordFlow is still working locally.', true);
-    showAuthGate('Cloud sign-in is unavailable. Please refresh and try again.', true);
     return false;
   }
 }
@@ -247,7 +255,6 @@ async function activateCloudSession() {
     if (cloudActivationForUserId === userId) cloudActivationForUserId = null;
   }
 
-  showApplication();
   scheduleReminders();
   navigate(location.hash.slice(1) || 'today');
   return true;
@@ -354,7 +361,7 @@ async function applyRealtimeCloudChange(remoteRecord) {
 }
 
 async function syncNow() {
-  if (!supabaseClient || !supabaseSession) return showToast('Sign in before syncing your library.', true);
+  if (!supabaseClient || !supabaseSession) return showAuthGate('Enter your email to sync this library across devices.');
   const button = $('syncNowBtn');
   button.disabled = true;
   button.classList.add('is-syncing');
@@ -423,7 +430,12 @@ function createReminderTimeFields() {
 
 function wireEvents() {
   $('magicLinkForm').addEventListener('submit', sendMagicLink);
-  $('syncNowBtn').addEventListener('click', syncNow);
+  $('authCloseBtn').addEventListener('click', () => hide($('authGate')));
+  $('syncNowBtn').addEventListener('click', toggleSyncMenu);
+  $('syncMenuBtn').addEventListener('click', () => { hideSyncMenu(); void syncNow(); });
+  $('signInBtn').addEventListener('click', () => { hideSyncMenu(); showAuthGate('Enter your email and we’ll send a secure sign-in link.'); });
+  $('checkUpdateBtn').addEventListener('click', () => void checkForUpdate());
+  $('refreshAppBtn').addEventListener('click', applyWaitingUpdate);
   document.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.nav)));
   $('knowBtn').addEventListener('click', () => updateTodayStatus('learned'));
   $('reviewBtn').addEventListener('click', () => updateTodayStatus('review'));
@@ -451,6 +463,55 @@ function wireEvents() {
     document.querySelectorAll('.filter-chip').forEach((button) => button.classList.remove('active'));
     chip.classList.add('active'); libraryFilter = chip.dataset.filter; renderLibrary();
   }));
+}
+
+function toggleSyncMenu() {
+  const menu = $('syncMenu');
+  const willOpen = menu.classList.contains('hidden');
+  menu.classList.toggle('hidden', !willOpen);
+  $('syncNowBtn').setAttribute('aria-expanded', String(willOpen));
+}
+
+function hideSyncMenu() { hide($('syncMenu')); $('syncNowBtn').setAttribute('aria-expanded', 'false'); }
+
+function announceUpdate(registration = serviceWorkerRegistration) {
+  if (!registration?.waiting) return false;
+  show($('refreshAppBtn'));
+  $('syncMenuStatus').textContent = 'A newer WordFlow version is ready.';
+  return true;
+}
+
+async function checkForUpdate() {
+  const button = $('checkUpdateBtn');
+  button.disabled = true;
+  button.textContent = 'Checking…';
+  try {
+    if (!serviceWorkerRegistration) serviceWorkerRegistration = await navigator.serviceWorker?.getRegistration();
+    await serviceWorkerRegistration?.update();
+    if (!announceUpdate()) $('syncMenuStatus').textContent = 'You already have the latest version.';
+  } catch {
+    $('syncMenuStatus').textContent = 'Could not check for an update right now.';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Check for update';
+  }
+}
+
+function applyWaitingUpdate() {
+  if (!serviceWorkerRegistration?.waiting) return window.location.reload();
+  refreshingForUpdate = true;
+  serviceWorkerRegistration.waiting.postMessage({ type: 'SKIP_WAITING' });
+}
+
+async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  serviceWorkerRegistration = await navigator.serviceWorker.register('/sw.js');
+  announceUpdate();
+  serviceWorkerRegistration.addEventListener('updatefound', () => {
+    const worker = serviceWorkerRegistration.installing;
+    worker?.addEventListener('statechange', () => { if (worker.state === 'installed') announceUpdate(); });
+  });
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (refreshingForUpdate) window.location.reload(); });
 }
 
 function navigate(section) {
@@ -705,14 +766,10 @@ async function renderTopics() {
 function makeTopicCard(topic, items) {
   const card = document.createElement('button'); card.className = 'topic-card'; card.type = 'button'; card.setAttribute('aria-label', `Open ${topic}`);
   const mark = document.createElement('span'); mark.className = 'topic-mark'; mark.textContent = topic.slice(0, 1).toLocaleUpperCase();
-  const copy = document.createElement('span'); copy.className = 'topic-card-copy';
-  const name = document.createElement('strong'); name.textContent = topic;
-  const count = document.createElement('span'); count.textContent = `${topicProgress(items)} / ${items.length} words covered`;
-  const track = document.createElement('span'); track.className = 'topic-progress';
-  const fill = document.createElement('span'); fill.style.width = `${items.length ? (topicProgress(items) / items.length) * 100 : 0}%`; track.append(fill);
-  copy.append(name, count, track);
+  const name = document.createElement('strong'); name.className = 'topic-card-name'; name.textContent = topic;
+  const count = document.createElement('span'); count.className = 'topic-card-count'; count.textContent = `${topicProgress(items)} / ${items.length}`;
   const arrow = document.createElement('span'); arrow.className = 'row-side'; arrow.textContent = '›';
-  card.append(mark, copy, arrow);
+  card.append(mark, name, count, arrow);
   card.addEventListener('click', () => openTopic(topic));
   return card;
 }
@@ -912,11 +969,15 @@ window.addEventListener('hashchange', () => { if (cloudReadyForUserId) navigate(
 async function boot() {
   try {
     db = await openDatabase();
-    if ('serviceWorker' in navigator) await navigator.serviceWorker.register('/sw.js');
+    await registerServiceWorker();
     await loadSettings(); await upgradeStoredItems(); $('masterPrompt').textContent = MASTER_PROMPT;
     createReminderTimeFields(); wireEvents();
-    const cloudReady = await initializeCloudSync();
-    if (cloudReady) { scheduleReminders(); navigate(location.hash.slice(1) || 'today'); }
+    // Open the offline-first library immediately. Saved authentication and
+    // cloud reconciliation complete quietly after the screen is usable.
+    showApplication();
+    scheduleReminders();
+    navigate(location.hash.slice(1) || 'today');
+    void initializeCloudSync();
   } catch (error) { console.error(error); document.querySelector('.app-shell').textContent = `WordFlow could not start: ${error.message}`; }
 }
 
