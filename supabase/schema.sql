@@ -61,6 +61,24 @@ create table if not exists public.wordflow_push_subscriptions (
   updated_at timestamptz not null default now()
 );
 
+-- Database constraints reject malformed browser writes early. The Netlify
+-- sender repeats stricter host validation before it makes any outbound call.
+alter table public.wordflow_push_subscriptions drop constraint if exists wordflow_push_endpoint_length;
+alter table public.wordflow_push_subscriptions add constraint wordflow_push_endpoint_length
+  check (coalesce(length(endpoint) between 1 and 2048, false)) not valid;
+alter table public.wordflow_push_subscriptions drop constraint if exists wordflow_push_subscription_shape;
+alter table public.wordflow_push_subscriptions add constraint wordflow_push_subscription_shape
+  check (coalesce(
+    jsonb_typeof(subscription) = 'object'
+    and subscription ->> 'endpoint' = endpoint
+    and jsonb_typeof(subscription -> 'keys') = 'object'
+    and length(subscription -> 'keys' ->> 'p256dh') between 16 and 256
+    and length(subscription -> 'keys' ->> 'auth') between 16 and 256
+  , false)) not valid;
+alter table public.wordflow_push_subscriptions drop constraint if exists wordflow_push_reminder_shape;
+alter table public.wordflow_push_subscriptions add constraint wordflow_push_reminder_shape
+  check (coalesce(cardinality(reminder_times) = 5 and length(timezone) between 1 and 80, false)) not valid;
+
 alter table public.wordflow_push_subscriptions enable row level security;
 grant select, insert, update, delete on public.wordflow_push_subscriptions to authenticated;
 

@@ -4,6 +4,40 @@ import webpush from 'web-push';
 // subscription is compared with its own saved IANA timezone and reminder time.
 export const config = { schedule: '*/5 * * * *' };
 
+const MAX_PUSH_ENDPOINT_LENGTH = 2048;
+const PUSH_HOSTS = new Set(['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'push.services.mozilla.com', 'web.push.apple.com']);
+
+function isAllowedPushHost(hostname) {
+  return PUSH_HOSTS.has(hostname)
+    || hostname.endsWith('.push.services.mozilla.com')
+    || hostname.endsWith('.notify.windows.com')
+    || hostname.endsWith('.push.apple.com');
+}
+
+// Push subscriptions are browser-owned data, but the scheduled function is a
+// privileged server. Validate them here before allowing web-push to make an
+// outbound request, rather than trusting an RLS-protected client row.
+export function isValidPushSubscription(row) {
+  if (!row || typeof row.endpoint !== 'string' || row.endpoint.length > MAX_PUSH_ENDPOINT_LENGTH) return false;
+  const subscription = row.subscription;
+  if (!subscription || typeof subscription !== 'object' || subscription.endpoint !== row.endpoint) return false;
+  const keys = subscription.keys;
+  if (!keys || typeof keys !== 'object' || !/^[A-Za-z0-9_-]{16,256}$/.test(keys.p256dh || '') || !/^[A-Za-z0-9_-]{16,256}$/.test(keys.auth || '')) return false;
+  if (!Array.isArray(row.reminder_times) || row.reminder_times.length !== 5 || row.reminder_times.some((time) => !/^([01]\d|2[0-3]):[0-5]\d$/.test(time))) return false;
+  if (typeof row.timezone !== 'string' || row.timezone.length > 80) return false;
+  try {
+    const url = new URL(row.endpoint);
+    return url.protocol === 'https:' && !url.port && !url.username && !url.password && isAllowedPushHost(url.hostname.toLocaleLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+function notificationText(value, fallback, maxLength) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return (text || fallback).slice(0, maxLength);
+}
+
 function requiredEnvironment() {
   const keys = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT'];
   const missing = keys.filter((key) => !process.env[key]);
@@ -26,8 +60,8 @@ export function notificationPayload(payload, reminderIndex, deliveryKey) {
   const item = items.find((candidate) => candidate.id === todayId) || items.find((candidate) => candidate.status === 'active') || items.find((candidate) => candidate.status === 'queued');
   if (!item) return { title: 'WordFlow reminder', body: 'Open WordFlow for today’s word.', tag: `wordflow-${deliveryKey}`, url: '/#today' };
   return {
-    title: `${item.term} — example ${reminderIndex + 1}`,
-    body: item.examples?.[reminderIndex] || item.meaning || 'Open WordFlow to keep learning.',
+    title: `${notificationText(item.term, 'WordFlow', 100)} — example ${reminderIndex + 1}`,
+    body: notificationText(item.examples?.[reminderIndex] || item.meaning, 'Open WordFlow to keep learning.', 500),
     tag: `wordflow-${deliveryKey}`,
     url: '/#today'
   };
@@ -64,13 +98,17 @@ export default async () => {
   const request = supabaseClient(environment);
   webpush.setVapidDetails(environment.VAPID_SUBJECT, environment.VAPID_PUBLIC_KEY, environment.VAPID_PRIVATE_KEY);
 
-  const subscriptions = await request('wordflow_push_subscriptions?select=endpoint,user_id,subscription,reminder_times,timezone&active=eq.true');
+  const subscriptions = await request('wordflow_push_subscriptions?select=endpoint,user_id,subscription,reminder_times,timezone&active=eq.true&limit=1000');
   const states = await request('wordflow_device_state?select=user_id,payload');
   const stateByUser = new Map(states.map((state) => [state.user_id, state.payload]));
   const now = new Date();
   let sent = 0;
 
   for (const row of subscriptions) {
+    if (!isValidPushSubscription(row)) {
+      console.warn('Ignoring an invalid push subscription.');
+      continue;
+    }
     let clock;
     try { clock = localClock(now, row.timezone); } catch { continue; }
     const reminderIndex = row.reminder_times.indexOf(clock.time);
@@ -82,6 +120,7 @@ export default async () => {
     try {
       await webpush.sendNotification(row.subscription, JSON.stringify(notificationPayload(stateByUser.get(row.user_id), reminderIndex, deliveryKey)), {
         TTL: 60 * 10,
+        timeout: 10_000,
         urgency: 'high',
         // Push-service topics permit URL-safe characters only; omit the colon
         // in HH:MM while retaining a stable per-device reminder identifier.

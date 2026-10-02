@@ -3,6 +3,18 @@
   publish = "public"
   functions = "netlify/functions"
 
+# The browser app loads one pinned, integrity-checked Supabase client from its
+# CDN. Cloud calls are restricted to Supabase; no private server secret is ever
+# delivered to this page. `unsafe-inline` is retained only for the app's small
+# runtime layout properties (progress and sheet state), not for scripts.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; form-action 'self'"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+
 [[redirects]]
   from = "/api/cloud-sync-config"
   to = "/.netlify/functions/cloud-sync-config"

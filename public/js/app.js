@@ -12,6 +12,25 @@ const DEFAULT_REMINDER_TIMES = ['09:00', '12:00', '15:00', '18:00', '21:00'];
 // Each successful review moves the word to the next gap in this sequence.
 const REVIEW_INTERVALS_DAYS = [1, 3, 7, 21, 60];
 const VALID_STATUSES = new Set(['queued', 'active', 'review', 'learned']);
+// These caps keep imports and restores responsive on a phone and prevent a
+// malformed local/cloud payload from exhausting browser storage or memory.
+const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
+const MAX_BACKUP_BYTES = 10 * 1024 * 1024;
+const MAX_STORED_ITEMS = 5000;
+const MAX_ITEM_BYTES = 12 * 1024;
+const MAX_TERM_LENGTH = 120;
+const MAX_TYPE_LENGTH = 80;
+const MAX_MEANING_LENGTH = 1200;
+const MAX_EXPLANATION_LENGTH = 2400;
+const MAX_ORIGIN_LENGTH = 2400;
+const MAX_PRONUNCIATION_LENGTH = 160;
+const MAX_CATEGORY_LENGTH = 120;
+const MAX_DIFFICULTY_LENGTH = 80;
+const MAX_EXAMPLE_LENGTH = 1200;
+const MAX_SYNONYM_LENGTH = 120;
+const MAX_SYNONYMS = 20;
+const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 const MASTER_PROMPT = `Create a WordFlow vocabulary learning pack as valid JSON.
 
@@ -52,6 +71,13 @@ let cloudRealtimeUserId = null;
 let applyingCloudState = false;
 let serviceWorkerRegistration = null;
 let refreshingForUpdate = false;
+let hasPendingCloudChanges = false;
+let cloudStatusIsError = false;
+let cloudChangeRevision = 0;
+let cloudSyncBaselineChangedAt = null;
+let cloudReconciliationComplete = false;
+let bootstrappingLocalState = true;
+let hasUserChangesBeforeCloudReconcile = false;
 
 const $ = (id) => document.getElementById(id);
 const show = (element) => element?.classList.remove('hidden');
@@ -89,22 +115,129 @@ async function removeItem(id) { const result = await requestValue(transaction(IT
 async function getSetting(key) { const row = await requestValue(transaction(SETTINGS_STORE).get(key)); return row?.value; }
 async function saveSetting(key, value) { return requestValue(transaction(SETTINGS_STORE, 'readwrite').put({ key, value })); }
 
-function defaultSettings() { return { reminderTimes: DEFAULT_REMINDER_TIMES, todayDate: null, todayItemId: null, selectedTopic: '', remindersEnabled: false, pushEnabled: false, lastChangedAt: null }; }
+function isPlainRecord(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
+function textByteLength(value) { return new TextEncoder().encode(String(value)).byteLength; }
+function serializedByteLength(value) { return textByteLength(JSON.stringify(value)); }
+
+function transactionComplete(databaseTransaction) {
+  return new Promise((resolve, reject) => {
+    databaseTransaction.oncomplete = () => resolve();
+    databaseTransaction.onerror = () => reject(databaseTransaction.error || new Error('Local storage could not be updated.'));
+    databaseTransaction.onabort = () => reject(databaseTransaction.error || new Error('Local storage update was cancelled.'));
+  });
+}
+
+// A restore/download must replace items and settings as one IndexedDB
+// transaction. If validation or a write fails, the previous local library
+// remains intact instead of being partly cleared.
+async function replaceStoredState(items, nextSettings) {
+  const databaseTransaction = db.transaction([ITEM_STORE, SETTINGS_STORE], 'readwrite');
+  const done = transactionComplete(databaseTransaction);
+  try {
+    const itemsStore = databaseTransaction.objectStore(ITEM_STORE);
+    const settingsStore = databaseTransaction.objectStore(SETTINGS_STORE);
+    itemsStore.clear();
+    items.forEach((item) => itemsStore.put(item));
+    settingsStore.put({ key: 'app', value: nextSettings });
+  } catch (error) {
+    try { databaseTransaction.abort(); } catch { /* The transaction may already be closed. */ }
+    await done.catch(() => {});
+    throw error;
+  }
+  await done;
+}
+
+function defaultSettings() { return { reminderTimes: DEFAULT_REMINDER_TIMES, todayDate: null, todayItemId: null, selectedTopic: '', dailyGoal: 3, dailyGoalDate: null, dailyGoalCompletedIds: [], darkMode: false, remindersEnabled: false, pushEnabled: false, lastChangedAt: null }; }
+
+function normaliseSettings(value, source = 'Settings') {
+  if (!isPlainRecord(value)) throw new Error(`${source} has an invalid settings section.`);
+  const defaults = defaultSettings();
+  const reminderTimes = value.reminderTimes === undefined ? defaults.reminderTimes : value.reminderTimes;
+  if (!Array.isArray(reminderTimes) || reminderTimes.length !== 5 || reminderTimes.some((time) => typeof time !== 'string' || !TIME_PATTERN.test(time)) || new Set(reminderTimes).size !== 5) {
+    throw new Error(`${source} has invalid reminder times.`);
+  }
+  const optionalDate = (date, name) => {
+    if (date === undefined || date === null || date === '') return null;
+    if (typeof date !== 'string' || !DATE_KEY_PATTERN.test(date)) throw new Error(`${source} has an invalid ${name}.`);
+    return date;
+  };
+  const optionalIdentifier = (identifier, name) => {
+    if (identifier === undefined || identifier === null || identifier === '') return null;
+    if (typeof identifier !== 'string' || identifier.length > 200) throw new Error(`${source} has an invalid ${name}.`);
+    return identifier;
+  };
+  const optionalBoolean = (boolean, name, fallback) => {
+    if (boolean === undefined) return fallback;
+    if (typeof boolean !== 'boolean') throw new Error(`${source} has an invalid ${name}.`);
+    return boolean;
+  };
+  const dailyGoal = value.dailyGoal === undefined ? defaults.dailyGoal : value.dailyGoal;
+  if (!Number.isInteger(dailyGoal) || dailyGoal < 1 || dailyGoal > 20) throw new Error(`${source} has an invalid daily goal.`);
+  const dailyGoalCompletedIds = value.dailyGoalCompletedIds === undefined ? [] : value.dailyGoalCompletedIds;
+  if (!Array.isArray(dailyGoalCompletedIds) || dailyGoalCompletedIds.length > 100 || dailyGoalCompletedIds.some((id) => typeof id !== 'string' || !id || id.length > 200)) {
+    throw new Error(`${source} has invalid daily-goal progress.`);
+  }
+  const selectedTopic = value.selectedTopic === undefined ? '' : value.selectedTopic;
+  if (typeof selectedTopic !== 'string' || selectedTopic.length > MAX_CATEGORY_LENGTH) throw new Error(`${source} has an invalid selected topic.`);
+  const lastChangedAt = value.lastChangedAt === undefined || value.lastChangedAt === null || value.lastChangedAt === '' ? null : value.lastChangedAt;
+  if (lastChangedAt !== null && (typeof lastChangedAt !== 'string' || lastChangedAt.length > 64 || !Number.isFinite(Date.parse(lastChangedAt)))) {
+    throw new Error(`${source} has an invalid modification time.`);
+  }
+  return {
+    ...defaults,
+    reminderTimes: [...reminderTimes].sort(),
+    todayDate: optionalDate(value.todayDate, 'today date'),
+    todayItemId: optionalIdentifier(value.todayItemId, 'today word'),
+    selectedTopic: selectedTopic.trim(),
+    dailyGoal,
+    dailyGoalDate: optionalDate(value.dailyGoalDate, 'daily-goal date'),
+    dailyGoalCompletedIds: [...new Set(dailyGoalCompletedIds)],
+    darkMode: optionalBoolean(value.darkMode, 'theme preference', false),
+    remindersEnabled: optionalBoolean(value.remindersEnabled, 'reminder preference', false),
+    pushEnabled: optionalBoolean(value.pushEnabled, 'push preference', false),
+    lastChangedAt
+  };
+}
+
 async function loadSettings() {
   const saved = await getSetting('app');
-  settings = { ...defaultSettings(), ...saved };
+  const syncState = await getSetting('cloud-sync');
+  try { settings = normaliseSettings(saved || {}); } catch (error) { console.warn('WordFlow settings were reset after validation failed:', error); settings = defaultSettings(); }
+  hasPendingCloudChanges = Boolean(syncState?.dirty);
+  cloudChangeRevision = Number.isInteger(syncState?.revision) ? syncState.revision : 0;
   // A first launch needs a timestamp; existing local/cloud state must keep its
   // original timestamp so the newer copy can win during reconciliation.
   if (!saved) await persistSettings();
 }
-async function persistSettings() { settings.lastChangedAt = new Date().toISOString(); await saveSetting('app', settings); queueCloudSync(); }
+async function persistSettings() { settings.lastChangedAt = new Date().toISOString(); markCloudChangesPending(); await saveSetting('app', settings); queueCloudSync(); }
 
 function recordLocalChange() {
   // During a download from Supabase, do not immediately upload that same state.
   if (applyingCloudState || !settings) return;
   settings.lastChangedAt = new Date().toISOString();
+  markCloudChangesPending();
   void saveSetting('app', settings);
   queueCloudSync();
+}
+
+function markCloudChangesPending() {
+  if (applyingCloudState) return;
+  cloudChangeRevision += 1;
+  hasPendingCloudChanges = true;
+  // Keep this device-only bit outside the synced app settings. It survives an
+  // offline restart without falsely telling another device it has pending work.
+  void saveSetting('cloud-sync', { dirty: true, revision: cloudChangeRevision });
+  if (!bootstrappingLocalState && !cloudReconciliationComplete) hasUserChangesBeforeCloudReconcile = true;
+  updateSyncControl();
+}
+
+function clearPendingCloudChanges(revision = null) {
+  // An older upload must never clear the marker for an edit made while that
+  // upload was in flight.
+  if (revision !== null && revision !== cloudChangeRevision) return;
+  hasPendingCloudChanges = false;
+  void saveSetting('cloud-sync', { dirty: false, revision: cloudChangeRevision });
+  updateSyncControl();
 }
 
 async function upgradeStoredItems() {
@@ -121,17 +254,21 @@ function setCloudStatus(message, isError = false) {
   if (!status) return;
   status.textContent = message;
   status.classList.toggle('error-text', isError);
-  updateSyncControl(isError);
+  cloudStatusIsError = isError;
+  updateSyncControl();
 }
 
-function updateSyncControl(isError = false) {
+function updateSyncControl() {
   const button = $('syncNowBtn');
   if (!button) return;
   const signedIn = Boolean(supabaseSession);
   const connected = Boolean(cloudReadyForUserId);
+  const changesWaitingOffline = hasPendingCloudChanges && (!navigator.onLine || !connected);
   button.classList.toggle('is-connected', connected);
-  button.classList.toggle('is-error', isError);
-  $('syncMenuStatus').textContent = connected ? 'Cloud sync active' : signedIn ? $('cloudStatus').textContent : 'Not signed in to cloud sync';
+  button.classList.toggle('is-offline', changesWaitingOffline);
+  button.classList.toggle('is-error', cloudStatusIsError && !changesWaitingOffline);
+  button.setAttribute('aria-label', changesWaitingOffline ? 'Offline changes waiting to sync' : 'Cloud sync and updates');
+  $('syncMenuStatus').textContent = changesWaitingOffline ? (signedIn ? 'Offline — changes will sync when connected.' : 'Changes are saved here. Sign in to sync them.') : connected ? 'Cloud sync active' : signedIn ? $('cloudStatus').textContent : 'Not signed in to cloud sync';
   $('syncMenuBtn').classList.toggle('hidden', !signedIn);
   $('signInBtn').classList.toggle('hidden', signedIn);
 }
@@ -153,6 +290,22 @@ function setAuthMessage(message, isError = false) {
   if (!status) return;
   status.textContent = message;
   status.classList.toggle('error-text', isError);
+}
+
+function applyTheme() {
+  const isDark = Boolean(settings?.darkMode);
+  document.documentElement.dataset.theme = isDark ? 'dark' : '';
+  document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', isDark ? '#181816' : '#f7f4ec');
+  const toggle = $('darkModeToggle');
+  if (toggle) toggle.checked = isDark;
+}
+
+async function toggleDarkMode(event) {
+  settings.darkMode = event.target.checked;
+  applyTheme();
+  await persistSettings();
+  showToast(settings.darkMode ? 'Dark mode enabled.' : 'Light mode enabled.');
 }
 
 async function getCloudConfig() {
@@ -256,7 +409,7 @@ async function activateCloudSession() {
   }
 
   scheduleReminders();
-  navigate(location.hash.slice(1) || 'today');
+  navigate(requestedRoute());
   return true;
 }
 
@@ -296,9 +449,11 @@ function queueCloudSync(delay = 700) {
 
 async function uploadCloudState() {
   if (!supabaseClient || !supabaseSession || applyingCloudState) return false;
+  const uploadRevision = cloudChangeRevision;
   const payload = { items: await getAllItems(), settings };
   const { error } = await supabaseClient.from('wordflow_device_state').upsert({ user_id: supabaseSession.user.id, payload, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
   if (error) { console.warn('WordFlow cloud upload failed:', error); setCloudStatus('Cloud sync could not save. Working locally.', true); return false; }
+  clearPendingCloudChanges(uploadRevision);
   setCloudStatus(`Synced ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
   return true;
 }
@@ -307,7 +462,12 @@ async function reconcileCloudState() {
   const { data, error } = await supabaseClient.from('wordflow_device_state').select('payload, updated_at').eq('user_id', supabaseSession.user.id).maybeSingle();
   if (error) throw error;
   const remoteChangedAt = Date.parse(data?.payload?.settings?.lastChangedAt || data?.updated_at || 0);
-  const localChangedAt = Date.parse(settings.lastChangedAt || 0);
+  // The first paint intentionally avoids blocking on Supabase. Ignore its
+  // bookkeeping writes when deciding whether a newer cloud snapshot wins.
+  const localTimestamp = !cloudReconciliationComplete && !hasUserChangesBeforeCloudReconcile
+    ? cloudSyncBaselineChangedAt
+    : settings.lastChangedAt;
+  const localChangedAt = Date.parse(localTimestamp || 0);
   const localItems = await getAllItems();
   // A fresh phone creates a local settings timestamp before it receives its
   // session. If it has no vocabulary yet, prefer the existing cloud library.
@@ -385,15 +545,13 @@ async function syncNow() {
 }
 
 async function applyCloudState(payload) {
-  if (!Array.isArray(payload.items) || !payload.settings) throw new Error('Cloud backup has an invalid format.');
+  const restoredState = validateStoredState(payload, 'Cloud backup');
   applyingCloudState = true;
   try {
-    await requestValue(transaction(ITEM_STORE, 'readwrite').clear());
-    // Direct writes intentionally bypass saveItem so this download does not
-    // trigger a competing upload while it is still being applied.
-    for (const item of payload.items) await requestValue(transaction(ITEM_STORE, 'readwrite').put(item));
-    settings = { ...defaultSettings(), ...payload.settings };
-    await saveSetting('app', settings);
+    await replaceStoredState(restoredState.items, restoredState.settings);
+    settings = restoredState.settings;
+    clearPendingCloudChanges();
+    applyTheme();
     createReminderTimeFields();
     scheduleReminders();
     if (settings.pushEnabled) void syncPushSubscription();
@@ -436,6 +594,7 @@ function wireEvents() {
   $('signInBtn').addEventListener('click', () => { hideSyncMenu(); showAuthGate('Enter your email and we’ll send a secure sign-in link.'); });
   $('checkUpdateBtn').addEventListener('click', () => void checkForUpdate());
   $('refreshAppBtn').addEventListener('click', applyWaitingUpdate);
+  $('darkModeToggle').addEventListener('change', toggleDarkMode);
   document.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.nav)));
   $('knowBtn').addEventListener('click', () => updateTodayStatus('learned'));
   $('reviewBtn').addEventListener('click', () => updateTodayStatus('review'));
@@ -505,13 +664,33 @@ function applyWaitingUpdate() {
 
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
-  serviceWorkerRegistration = await navigator.serviceWorker.register('/sw.js');
-  announceUpdate();
-  serviceWorkerRegistration.addEventListener('updatefound', () => {
-    const worker = serviceWorkerRegistration.installing;
-    worker?.addEventListener('statechange', () => { if (worker.state === 'installed') announceUpdate(); });
-  });
-  navigator.serviceWorker.addEventListener('controllerchange', () => { if (refreshingForUpdate) window.location.reload(); });
+  try {
+    serviceWorkerRegistration = await navigator.serviceWorker.register('/sw.js');
+    announceUpdate();
+    serviceWorkerRegistration.addEventListener('updatefound', () => {
+      const worker = serviceWorkerRegistration.installing;
+      worker?.addEventListener('statechange', () => { if (worker.state === 'installed') announceUpdate(); });
+    });
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (refreshingForUpdate) window.location.reload(); });
+  } catch (error) {
+    // Service-worker support improves offline/PWA behavior but must never
+    // prevent the IndexedDB app from opening in a restricted browser mode.
+    console.warn('WordFlow service worker could not register:', error);
+  }
+}
+
+const APP_ROUTES = new Set(['today', 'topics', 'library', 'import', 'settings']);
+
+function requestedRoute() {
+  const route = location.hash.slice(1);
+  // Keep old Queue links functional; navigate() translates this to Library's
+  // Queue filter after startup rather than silently sending people to Today.
+  return route === 'queue' || APP_ROUTES.has(route) ? route : 'today';
+}
+
+function isSupabaseCallback() {
+  const callbackData = `${location.search}&${location.hash}`;
+  return /(?:access_token|refresh_token|code|error_description)=/.test(callbackData);
 }
 
 function navigate(section) {
@@ -521,8 +700,7 @@ function navigate(section) {
     libraryFilter = 'queued';
     section = 'library';
   }
-  const allowed = ['today', 'topics', 'library', 'import', 'settings'];
-  const target = allowed.includes(section) ? section : 'today';
+  const target = APP_ROUTES.has(section) ? section : 'today';
   document.querySelectorAll('[data-section]').forEach((element) => element.classList.toggle('hidden', element.dataset.section !== target));
   document.querySelectorAll('.nav-item').forEach((button) => button.classList.toggle('active', button.dataset.nav === target));
   history.replaceState(null, '', `#${target}`);
@@ -536,13 +714,42 @@ function topicNameFor(item) { return item.category?.trim() || 'Uncategorized'; }
 function inSelectedTopic(item) { return !settings.selectedTopic || topicNameFor(item) === settings.selectedTopic; }
 function topicProgress(items) { return items.filter((item) => item.status !== 'queued').length; }
 
-async function renderTopicPicker(items) {
+async function ensureDailyGoalToday() {
+  if (settings.dailyGoalDate === todayKey()) return;
+  settings.dailyGoalDate = todayKey();
+  settings.dailyGoalCompletedIds = [];
+  await persistSettings();
+}
+
+function renderDailyGoal() {
+  const goal = settings.dailyGoal;
+  const completedIds = settings.dailyGoalDate === todayKey() ? settings.dailyGoalCompletedIds : [];
+  const completed = Math.min(goal, completedIds.length);
+  $('dailyGoalText').textContent = `${completed} of ${goal} words`;
+  $('dailyGoal').setAttribute('aria-label', `Daily goal: ${completed} of ${goal} words`);
+  $('dailyGoalDots').replaceChildren(...Array.from({ length: goal }, (_, index) => {
+    const dot = document.createElement('i');
+    if (index < completed) dot.classList.add('complete');
+    return dot;
+  }));
+}
+
+async function countTowardDailyGoal(itemId) {
+  await ensureDailyGoalToday();
+  if (!settings.dailyGoalCompletedIds.includes(itemId)) {
+    settings.dailyGoalCompletedIds.push(itemId);
+    await persistSettings();
+  }
+  renderDailyGoal();
+}
+
+async function renderTopicPicker(items, allowMutations = true) {
   if (!items) items = await getAllItems();
   const select = $('topicSelect');
   const topics = [...new Set(items.map(topicNameFor))].sort((a, b) => a.localeCompare(b));
   if (settings.selectedTopic && !topics.includes(settings.selectedTopic)) {
     settings.selectedTopic = '';
-    await persistSettings();
+    if (allowMutations) await persistSettings();
   }
   select.replaceChildren();
   const allOption = document.createElement('option'); allOption.value = ''; allOption.textContent = 'All topics'; select.append(allOption);
@@ -586,10 +793,14 @@ async function ensureTodayItem() {
   return settings.todayItemId ? getItem(settings.todayItemId) : null;
 }
 
-async function loadToday() {
+async function loadToday({ allowMutations = true } = {}) {
+  if (allowMutations) await ensureDailyGoalToday();
+  renderDailyGoal();
   const allItems = await getAllItems();
-  await renderTopicPicker(allItems);
-  currentTodayItem = await ensureTodayItem();
+  await renderTopicPicker(allItems, allowMutations);
+  currentTodayItem = allowMutations
+    ? await ensureTodayItem()
+    : (settings.todayItemId ? await getItem(settings.todayItemId) : allItems.find((item) => item.status === 'active') || allItems.find((item) => item.status === 'queued') || null);
   if (!currentTodayItem) { hide($('todayCard')); show($('todayEmpty')); await updateNotificationStatus(); return; }
   hide($('todayEmpty')); show($('todayCard'));
   $('todayType').textContent = currentTodayItem.type;
@@ -653,6 +864,7 @@ async function updateTodayStatus(status) {
   // changing the spaced-repetition stage that it may receive later.
   if (status === 'review') updated = { ...updated, reviewDueDate: todayKey(), reviewStage: null };
   await saveItem(updated); currentTodayItem = updated;
+  await countTowardDailyGoal(updated.id);
   showToast(status === 'learned' ? 'Added to your 1, 3, 7, 21, 60-day review plan.' : 'Added to your review list.');
   await Promise.all([loadToday(), renderTopics(), renderReviews(), renderLibrary()]);
 }
@@ -688,22 +900,125 @@ async function addManualWord(event) {
   } catch (error) { showToast(error.message, true); }
 }
 
-function validateItem(item, name = 'Item') {
-  if (!item?.term?.trim() || !item.type?.trim() || !item.meaning?.trim()) throw new Error(`${name} needs a term, type and meaning.`);
-  if (!Array.isArray(item.examples) || item.examples.length !== 5 || item.examples.some((example) => typeof example !== 'string' || !example.trim())) throw new Error(`${name} needs exactly five non-empty example sentences.`);
-  if (item.origin !== undefined && (typeof item.origin !== 'string' || !item.origin.trim())) throw new Error(`${name} has an invalid origin.`);
-  if (item.synonyms !== undefined && (!Array.isArray(item.synonyms) || !item.synonyms.length || item.synonyms.some((synonym) => typeof synonym !== 'string' || !synonym.trim()))) throw new Error(`${name} has invalid synonyms.`);
-  if (item.pronunciation !== undefined && typeof item.pronunciation !== 'string') throw new Error(`${name} has an invalid pronunciation.`);
+function validateText(value, label, maximumLength, required = false) {
+  if (typeof value !== 'string') throw new Error(`${label} must be text.`);
+  if (value.length > maximumLength) throw new Error(`${label} is too long.`);
+  if (required && !value.trim()) throw new Error(`${label} cannot be empty.`);
+}
+
+function validateWordFields(item, name, { allowEmptyOptional = false } = {}) {
+  if (!isPlainRecord(item)) throw new Error(`${name} must be an object.`);
+  [['term', MAX_TERM_LENGTH], ['type', MAX_TYPE_LENGTH], ['meaning', MAX_MEANING_LENGTH]].forEach(([field, maximumLength]) => {
+    validateText(item[field], `${name} ${field}`, maximumLength, true);
+  });
+  if (!Array.isArray(item.examples) || item.examples.length !== 5) throw new Error(`${name} needs exactly five example sentences.`);
+  item.examples.forEach((example, index) => validateText(example, `${name} example ${index + 1}`, MAX_EXAMPLE_LENGTH, true));
+  if (item.origin !== undefined) validateText(item.origin, `${name} origin`, MAX_ORIGIN_LENGTH, !allowEmptyOptional);
+  if (item.pronunciation !== undefined) validateText(item.pronunciation, `${name} pronunciation`, MAX_PRONUNCIATION_LENGTH);
+  if (item.explanation !== undefined) validateText(item.explanation, `${name} usage note`, MAX_EXPLANATION_LENGTH);
+  if (item.category !== undefined) validateText(item.category, `${name} category`, MAX_CATEGORY_LENGTH);
+  if (item.difficulty !== undefined) validateText(item.difficulty, `${name} difficulty`, MAX_DIFFICULTY_LENGTH);
+  if (item.synonyms !== undefined) {
+    if (!Array.isArray(item.synonyms) || item.synonyms.length > MAX_SYNONYMS || (!allowEmptyOptional && !item.synonyms.length)) throw new Error(`${name} has invalid synonyms.`);
+    item.synonyms.forEach((synonym, index) => validateText(synonym, `${name} synonym ${index + 1}`, MAX_SYNONYM_LENGTH, !allowEmptyOptional));
+  }
+  if (serializedByteLength(item) > MAX_ITEM_BYTES) throw new Error(`${name} is too large.`);
+}
+
+function validateItem(item, name = 'Item') { validateWordFields(item, name); }
+
+function normaliseStoredItem(item, name) {
+  validateWordFields(item, name, { allowEmptyOptional: true });
+  if (typeof item.id !== 'string' || !item.id.trim() || item.id.length > 200) throw new Error(`${name} has an invalid ID.`);
+  if (!VALID_STATUSES.has(item.status)) throw new Error(`${name} has an invalid status.`);
+  if (!Number.isFinite(item.queuePosition)) throw new Error(`${name} has an invalid queue position.`);
+  const optionalTimestamp = (value, field) => {
+    if (value === undefined || value === null || value === '') return null;
+    if (typeof value !== 'string' || value.length > 64 || !Number.isFinite(Date.parse(value))) throw new Error(`${name} has an invalid ${field}.`);
+    return value;
+  };
+  const optionalDate = (value, field) => {
+    if (value === undefined || value === null || value === '') return null;
+    if (typeof value !== 'string' || !DATE_KEY_PATTERN.test(value)) throw new Error(`${name} has an invalid ${field}.`);
+    return value;
+  };
+  const reviewStage = item.reviewStage === undefined || item.reviewStage === null ? null : item.reviewStage;
+  if (reviewStage !== null && (!Number.isInteger(reviewStage) || reviewStage < 0 || reviewStage > REVIEW_INTERVALS_DAYS.length)) throw new Error(`${name} has an invalid review stage.`);
+  if (item.isFavorite !== undefined && typeof item.isFavorite !== 'boolean') throw new Error(`${name} has an invalid saved status.`);
+  return {
+    ...item,
+    id: item.id.trim(),
+    term: item.term.trim(),
+    normalizedTerm: normalizeTerm(item.term),
+    type: item.type.trim(),
+    meaning: item.meaning.trim(),
+    pronunciation: (item.pronunciation || '').trim(),
+    explanation: (item.explanation || '').trim(),
+    origin: (item.origin || '').trim(),
+    synonyms: (item.synonyms || []).map((synonym) => synonym.trim()),
+    category: (item.category || '').trim(),
+    difficulty: (item.difficulty || '').trim(),
+    examples: item.examples.map((example) => example.trim()),
+    queuePosition: item.queuePosition,
+    createdAt: optionalTimestamp(item.createdAt, 'creation time') || new Date(0).toISOString(),
+    startedOn: optionalDate(item.startedOn, 'start date'),
+    learnedAt: optionalTimestamp(item.learnedAt, 'learned time'),
+    isFavorite: Boolean(item.isFavorite),
+    reviewStage,
+    reviewDueDate: optionalDate(item.reviewDueDate, 'review date')
+  };
+}
+
+function validateStoredState(payload, source = 'Backup') {
+  if (!isPlainRecord(payload) || !Array.isArray(payload.items) || !payload.settings) throw new Error(`${source} has an invalid format.`);
+  if (payload.items.length > MAX_STORED_ITEMS) throw new Error(`${source} contains too many words.`);
+  if (serializedByteLength(payload) > MAX_BACKUP_BYTES) throw new Error(`${source} is too large.`);
+  const itemIds = new Set();
+  const terms = new Set();
+  const items = payload.items.map((item, index) => {
+    const normalised = normaliseStoredItem(item, `${source} item ${index + 1}`);
+    if (itemIds.has(normalised.id) || terms.has(normalised.normalizedTerm)) throw new Error(`${source} contains duplicate words.`);
+    itemIds.add(normalised.id);
+    terms.add(normalised.normalizedTerm);
+    return normalised;
+  });
+  return { items, settings: normaliseSettings(payload.settings, source) };
 }
 
 function validatePack(payload) {
-  if (payload?.schema_version !== 1 || !payload.pack?.name || !Array.isArray(payload.items) || !payload.items.length) throw new Error('This is not a valid WordFlow pack.');
+  if (!isPlainRecord(payload) || payload.schema_version !== 1 || !isPlainRecord(payload.pack) || !Array.isArray(payload.items) || !payload.items.length) throw new Error('This is not a valid WordFlow pack.');
+  if (serializedByteLength(payload) > MAX_IMPORT_BYTES) throw new Error('This pack is too large.');
+  validateText(payload.pack.name, 'Pack name', 160, true);
+  if (payload.pack.description !== undefined) validateText(payload.pack.description, 'Pack description', 600);
+  if (payload.pack.topic !== undefined) validateText(payload.pack.topic, 'Pack topic', MAX_CATEGORY_LENGTH);
+  if (payload.pack.difficulty !== undefined) validateText(payload.pack.difficulty, 'Pack difficulty', MAX_DIFFICULTY_LENGTH);
   if (payload.items.length > 200) throw new Error('A pack can contain at most 200 items.');
-  payload.items.forEach((item, index) => validateItem(item, `Item ${index + 1}`)); return payload;
+  const terms = new Set();
+  payload.items.forEach((item, index) => {
+    validateItem(item, `Item ${index + 1}`);
+    const term = normalizeTerm(item.term);
+    if (terms.has(term)) throw new Error('A pack cannot contain the same word twice.');
+    terms.add(term);
+  });
+  return payload;
 }
 
-async function readFileImport(event) { const file = event.target.files?.[0]; if (!file) return; try { previewImport(JSON.parse(await file.text()), file.name); } catch (error) { showToast(`Could not read that JSON: ${error.message}`, true); } }
-function previewPastedImport() { try { previewImport(JSON.parse($('jsonPaste').value), 'Pasted JSON'); } catch (error) { showToast(`Could not read that JSON: ${error.message}`, true); } }
+async function readFileImport(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    if (file.size > MAX_IMPORT_BYTES) throw new Error('That file is larger than the 2 MB import limit.');
+    previewImport(JSON.parse(await file.text()), file.name);
+  } catch (error) { showToast(`Could not read that JSON: ${error.message}`, true); }
+}
+
+function previewPastedImport() {
+  try {
+    const pasted = $('jsonPaste').value;
+    if (textByteLength(pasted) > MAX_IMPORT_BYTES) throw new Error('That pasted pack is larger than the 2 MB import limit.');
+    previewImport(JSON.parse(pasted), 'Pasted JSON');
+  } catch (error) { showToast(`Could not read that JSON: ${error.message}`, true); }
+}
 function previewImport(payload, sourceName) {
   currentImport = validatePack(payload);
   hide($('importMessage'));
@@ -765,13 +1080,30 @@ async function renderTopics() {
 
 function makeTopicCard(topic, items) {
   const card = document.createElement('button'); card.className = 'topic-card'; card.type = 'button'; card.setAttribute('aria-label', `Open ${topic}`);
-  const mark = document.createElement('span'); mark.className = 'topic-mark'; mark.textContent = topic.slice(0, 1).toLocaleUpperCase();
+  const mark = document.createElement('span'); mark.className = 'topic-mark'; mark.setAttribute('aria-hidden', 'true'); mark.append(createTopicIcon(topic));
   const name = document.createElement('strong'); name.className = 'topic-card-name'; name.textContent = topic;
   const count = document.createElement('span'); count.className = 'topic-card-count'; count.textContent = `${topicProgress(items)} / ${items.length}`;
   const arrow = document.createElement('span'); arrow.className = 'row-side'; arrow.textContent = '›';
   card.append(mark, name, count, arrow);
   card.addEventListener('click', () => openTopic(topic));
   return card;
+}
+
+function createTopicIcon(topic) {
+  const normalized = topic.toLocaleLowerCase();
+  let symbol = 'icon-topics';
+  if (/(analysis|research|study|thinking|critical)/.test(normalized)) symbol = 'icon-topic-search';
+  else if (/(communicat|conversation|meeting|language|writing|speaking)/.test(normalized)) symbol = 'icon-topic-chat';
+  else if (/(decision|strategy|planning|direction)/.test(normalized)) symbol = 'icon-topic-compass';
+  else if (/(read|literature|book|everyday)/.test(normalized)) symbol = 'icon-topic-book';
+  else if (/(leader|team|people|management)/.test(normalized)) symbol = 'icon-topic-people';
+  else if (/(negotiat|sales|relationship|agreement)/.test(normalized)) symbol = 'icon-topic-handshake';
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.classList.add('icon');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', `#${symbol}`);
+  svg.append(use);
+  return svg;
 }
 
 async function openTopic(topic) {
@@ -830,6 +1162,7 @@ async function completeReview(item) {
     ? { ...item, status: 'learned', reviewStage: nextStage, reviewDueDate: null, learnedAt: new Date().toISOString() }
     : { ...item, status: 'review', reviewStage: nextStage, reviewDueDate: addDaysKey(REVIEW_INTERVALS_DAYS[nextStage]) };
   await saveItem(updated);
+  await countTowardDailyGoal(updated.id);
   showToast(updated.status === 'learned' ? 'Review plan complete — word learned.' : `Next review: ${updated.reviewDueDate}.`);
   await Promise.all([renderReviews(), renderLibrary(), loadToday()]);
 }
@@ -942,17 +1275,24 @@ async function exportBackup() {
 async function restoreBackup(event) {
   const file = event.target.files?.[0]; if (!file) return;
   try {
+    if (file.size > MAX_BACKUP_BYTES) throw new Error('That backup is larger than the 10 MB restore limit.');
     const backup = JSON.parse(await file.text());
-    if (backup?.wordflowBackupVersion !== 1 || !Array.isArray(backup.items) || !backup.settings) throw new Error('This is not a WordFlow backup.');
+    if (!isPlainRecord(backup) || backup.wordflowBackupVersion !== 1) throw new Error('This is not a WordFlow backup.');
+    // Validate every field before the confirmation prompt or any IndexedDB
+    // write. A malformed file must never clear part of the local library.
+    const restoredState = validateStoredState(backup, 'Backup');
     if (!window.confirm('Restore this backup? It will replace the WordFlow data on this device.')) return;
-    // Each helper uses its own short transaction. This avoids reusing an
-    // IndexedDB transaction after an awaited operation has completed it.
-    await requestValue(transaction(ITEM_STORE, 'readwrite').clear());
-    for (const item of backup.items) {
-      if (!VALID_STATUSES.has(item.status)) throw new Error('The backup contains an invalid item status.');
-      await saveItem(item);
-    }
-    settings = { ...defaultSettings(), ...backup.settings }; await persistSettings(); createReminderTimeFields(); scheduleReminders(); await Promise.all([loadToday(), renderTopics(), renderLibrary(), updateNotificationStatus()]); showBackupMessage('Backup restored successfully.');
+    // Make an explicit user-initiated restore the newest local snapshot, then
+    // replace items and settings atomically in one IndexedDB transaction.
+    restoredState.settings.lastChangedAt = new Date().toISOString();
+    await replaceStoredState(restoredState.items, restoredState.settings);
+    settings = restoredState.settings;
+    markCloudChangesPending();
+    queueCloudSync();
+    applyTheme();
+    createReminderTimeFields(); scheduleReminders();
+    await Promise.all([loadToday(), renderTopics(), renderLibrary(), updateNotificationStatus()]);
+    showBackupMessage('Backup restored successfully.');
   } catch (error) { showBackupMessage(error.message, true); } finally { event.target.value = ''; }
 }
 
@@ -965,19 +1305,38 @@ $('installBtn')?.addEventListener('click', async () => { if (!deferredInstallPro
 // Ignore the temporary hash used by a returning magic link until the cloud
 // session has completed its first safe download/upload reconciliation.
 window.addEventListener('hashchange', () => { if (cloudReadyForUserId) navigate(location.hash.slice(1)); });
+window.addEventListener('offline', () => updateSyncControl());
+window.addEventListener('online', () => {
+  updateSyncControl();
+  if (supabaseClient && supabaseSession && hasPendingCloudChanges) queueCloudSync(0);
+});
 
 async function boot() {
   try {
     db = await openDatabase();
     await registerServiceWorker();
-    await loadSettings(); await upgradeStoredItems(); $('masterPrompt').textContent = MASTER_PROMPT;
+    await loadSettings();
+    // Capture the persisted state before harmless first-paint bookkeeping can
+    // change its timestamp. This protects a newer device's cloud library.
+    cloudSyncBaselineChangedAt = settings.lastChangedAt;
+    await upgradeStoredItems(); $('masterPrompt').textContent = MASTER_PROMPT;
+    applyTheme();
     createReminderTimeFields(); wireEvents();
     // Open the offline-first library immediately. Saved authentication and
     // cloud reconciliation complete quietly after the screen is usable.
     showApplication();
     scheduleReminders();
-    navigate(location.hash.slice(1) || 'today');
-    void initializeCloudSync();
+    const initialRoute = requestedRoute();
+    const authCallback = isSupabaseCallback();
+    if (initialRoute === 'today') await loadToday({ allowMutations: false });
+    else navigate(initialRoute);
+    bootstrappingLocalState = false;
+    // Do not replace a magic-link fragment until Supabase has consumed it.
+    void initializeCloudSync().finally(() => {
+      cloudReconciliationComplete = true;
+      if (initialRoute === 'today') void loadToday();
+      else if (authCallback) navigate(initialRoute);
+    });
   } catch (error) { console.error(error); document.querySelector('.app-shell').textContent = `WordFlow could not start: ${error.message}`; }
 }
 
